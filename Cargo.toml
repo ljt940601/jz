@@ -1,0 +1,17 @@
+[package]
+name = "jz"
+version = "0.1.0"
+edition = "2021"
+description = "游戏陪玩记账软件"
+
+[dependencies]
+eframe = "0.27"
+rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = "0.4"
+dirs = "5.0"
+
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

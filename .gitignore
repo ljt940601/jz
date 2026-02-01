@@ -1,0 +1,4 @@
+# Rust build directory
+/target/
+
+# Cargo.lock is optional for binaries, but we'll keep it
