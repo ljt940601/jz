@@ -110,6 +110,10 @@ struct App {
     boss_balances: std::collections::HashMap<String, f64>,
     boss_list: Vec<String>,
 
+    // 月结余选择器
+    selected_year: i32,
+    selected_month: u32,
+
     input_date: NaiveDate,
     input_boss: String,
     input_income: String,
@@ -140,6 +144,8 @@ impl App {
             month_balance,
             boss_balances,
             boss_list,
+            selected_year: today.year(),
+            selected_month: today.month(),
             input_date: today,
             input_boss: String::new(),
             input_income: String::new(),
@@ -177,7 +183,8 @@ impl App {
         self.total_balance = self.db.get_total_balance();
         let today = Local::now().date_naive();
         self.day_balance = Self::calc_day_balance(&self.records, &today.format("%Y-%m-%d").to_string());
-        self.month_balance = Self::calc_month_balance(&self.records, &today.format("%Y-%m").to_string());
+        let year_month = format!("{}-{:02}", self.selected_year, self.selected_month);
+        self.month_balance = Self::calc_month_balance(&self.records, &year_month);
         self.boss_balances = Self::calc_boss_balances(&self.records);
         self.boss_list = self.db.get_all_bosses();
     }
@@ -189,18 +196,26 @@ impl App {
     }
 
     fn add_record(&mut self) {
+        const MAX_INCOME: f64 = 100_000.0; // 单笔最大10万
+
         if self.input_boss.trim().is_empty() {
             self.show_message("请输入老板名称", true);
             return;
         }
 
-        let income: f64 = match self.input_income.trim().parse() {
-            Ok(v) if v > 0.0 => v,
+        let income: f64 = match self.input_income.trim().parse::<f64>() {
+            Ok(v) if v > 0.0 && v.is_finite() => v,
             _ => {
                 self.show_message("请输入有效金额", true);
                 return;
             }
         };
+
+        // 检查单笔金额上限
+        if income > MAX_INCOME {
+            self.show_message(&format!("单笔金额不能超过 ¥{:.0}", MAX_INCOME), true);
+            return;
+        }
 
         let date_str = self.input_date.format("%Y-%m-%d").to_string();
         match self.db.add_record(&date_str, self.input_boss.trim(), income) {
@@ -236,6 +251,35 @@ fn days_in_month(year: i32, month: u32) -> u32 {
             }
         }
         _ => 30,
+    }
+}
+
+/// 格式化金额显示，大金额使用万/亿为单位
+fn format_money(amount: f64) -> String {
+    let abs_amount = amount.abs();
+    let sign = if amount < 0.0 { "-" } else { "" };
+
+    if abs_amount >= 100_000_000.0 {
+        // 亿
+        format!("{}¥{:.2}亿", sign, abs_amount / 100_000_000.0)
+    } else if abs_amount >= 100_000.0 {
+        // 万
+        format!("{}¥{:.2}万", sign, abs_amount / 10_000.0)
+    } else {
+        format!("{}¥{:.2}", sign, abs_amount)
+    }
+}
+
+/// 格式化收入显示（带+号）
+fn format_income(amount: f64) -> String {
+    let abs_amount = amount.abs();
+
+    if abs_amount >= 100_000_000.0 {
+        format!("+{:.2}亿", abs_amount / 100_000_000.0)
+    } else if abs_amount >= 100_000.0 {
+        format!("+{:.2}万", abs_amount / 10_000.0)
+    } else {
+        format!("+{:.2}", abs_amount)
     }
 }
 
@@ -276,41 +320,87 @@ impl eframe::App for App {
                 let _w = ui.available_width();
 
                 // ===== 顶部标题区 =====
+                let mut month_changed = false;
+                let mut new_sel_year = self.selected_year;
+                let mut new_sel_month = self.selected_month;
+                let combo_text_color = Color32::from_rgb(30, 30, 35); // 下拉框文字用深色
+
+                // 标题行：左边标题，右边统计信息
                 ui.horizontal(|ui| {
+                    // 左边：标题
                     ui.label(RichText::new("游戏陪玩记账")
                         .font(FontId::proportional(28.0))
                         .color(text_primary));
 
+                    // 右边：统计信息（右对齐）
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // 从右到左排列：总结余 -> 月结余 -> 日结余
+
                         // 总结余
-                        ui.label(RichText::new(format!("¥{:.2}", self.total_balance))
-                            .font(FontId::proportional(28.0))
+                        ui.label(RichText::new(format_money(self.total_balance))
+                            .font(FontId::proportional(22.0))
                             .color(green_color));
                         ui.label(RichText::new("总结余")
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
 
-                        ui.add_space(24.0);
+                        ui.add_space(20.0);
 
                         // 月结余
-                        ui.label(RichText::new(format!("¥{:.2}", self.month_balance))
-                            .font(FontId::proportional(22.0))
+                        ui.label(RichText::new(format_money(self.month_balance))
+                            .font(FontId::proportional(18.0))
                             .color(accent_color));
+
+                        // 月份选择
+                        let month_combo = egui::ComboBox::from_id_source("header_month_select")
+                            .width(45.0)
+                            .selected_text(RichText::new(format!("{:02}", new_sel_month)).size(13.0).color(combo_text_color));
+                        month_combo.show_ui(ui, |ui| {
+                            for m in 1..=12u32 {
+                                if ui.selectable_value(&mut new_sel_month, m, format!("{:02}月", m)).changed() {
+                                    month_changed = true;
+                                }
+                            }
+                        });
+
+                        ui.label(RichText::new("-").size(13.0).color(text_secondary));
+
+                        // 年份选择
+                        let current_year = Local::now().year();
+                        let year_combo = egui::ComboBox::from_id_source("header_year_select")
+                            .width(65.0)
+                            .selected_text(RichText::new(format!("{}", new_sel_year)).size(13.0).color(combo_text_color));
+                        year_combo.show_ui(ui, |ui| {
+                            for y in ((current_year - 10)..=(current_year)).rev() {
+                                if ui.selectable_value(&mut new_sel_year, y, format!("{}年", y)).changed() {
+                                    month_changed = true;
+                                }
+                            }
+                        });
+
                         ui.label(RichText::new("月结余")
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
 
-                        ui.add_space(24.0);
+                        ui.add_space(20.0);
 
                         // 日结余
-                        ui.label(RichText::new(format!("¥{:.2}", self.day_balance))
-                            .font(FontId::proportional(22.0))
+                        ui.label(RichText::new(format_money(self.day_balance))
+                            .font(FontId::proportional(18.0))
                             .color(text_primary));
                         ui.label(RichText::new("日结余")
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
                     });
                 });
+
+                // 处理年月选择变化
+                if month_changed || new_sel_year != self.selected_year || new_sel_month != self.selected_month {
+                    self.selected_year = new_sel_year;
+                    self.selected_month = new_sel_month;
+                    let year_month = format!("{}-{:02}", self.selected_year, self.selected_month);
+                    self.month_balance = Self::calc_month_balance(&self.records, &year_month);
+                }
 
                 ui.add_space(30.0);
 
@@ -493,7 +583,7 @@ impl eframe::App for App {
 
                             ui.add_space(col_spacing);
 
-                            // 收入
+                            // 收入（限制输入长度，最多10字符：100000.00）
                             ui.vertical(|ui| {
                                 ui.label(RichText::new("收入").color(text_secondary).size(label_size));
                                 ui.add_space(6.0);
@@ -502,6 +592,7 @@ impl eframe::App for App {
                                     egui::TextEdit::singleline(&mut self.input_income)
                                         .font(FontId::proportional(input_font_size))
                                         .margin(Vec2::new(12.0, 8.0))
+                                        .char_limit(10)
                                 );
                             });
 
@@ -637,7 +728,7 @@ impl eframe::App for App {
                                                             .size(15.0)
                                                     ));
                                                     ui.add_sized([col_widths[2], text_height], egui::Label::new(
-                                                        RichText::new(format!("+{:.2}", record.income))
+                                                        RichText::new(format_income(record.income))
                                                             .color(green_color)
                                                             .size(15.0)
                                                     ));
@@ -645,7 +736,7 @@ impl eframe::App for App {
                                                         .get(&record.boss)
                                                         .unwrap_or(&0.0);
                                                     ui.add_sized([col_widths[3], text_height], egui::Label::new(
-                                                        RichText::new(format!("¥{:.2}", balance))
+                                                        RichText::new(format_money(*balance))
                                                             .color(text_primary)
                                                             .size(15.0)
                                                     ));
