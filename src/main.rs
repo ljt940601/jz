@@ -683,18 +683,32 @@ impl eframe::App for App {
                         ui.separator();
                         ui.add_space(6.0);
 
-                        // 数据列表
+                        // 数据列表（只显示选中日期的记录）
+                        let selected_date_str = self.input_date.format("%Y-%m-%d").to_string();
+                        let filtered_records: Vec<Record> = self.records.iter()
+                            .filter(|r| r.date == selected_date_str)
+                            .cloned()
+                            .collect();
+
+                        // 计算当日累计结余（running total）
+                        let mut running_balances: Vec<f64> = Vec::new();
+                        let mut running_total = 0.0;
+                        for r in &filtered_records {
+                            running_total += r.income;
+                            running_balances.push(running_total);
+                        }
+
                         egui::ScrollArea::vertical()
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                if self.records.is_empty() {
+                                if filtered_records.is_empty() {
                                     ui.add_space(80.0);
                                     ui.vertical_centered(|ui| {
-                                        ui.label(RichText::new("暂无记录")
+                                        ui.label(RichText::new("当日暂无记录")
                                             .color(text_secondary)
                                             .size(17.0));
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("添加第一条记录开始记账")
+                                        ui.label(RichText::new("选择其他日期或添加新记录")
                                             .color(Color32::from_rgb(100, 105, 115))
                                             .size(13.0));
                                     });
@@ -702,7 +716,7 @@ impl eframe::App for App {
                                     let mut to_delete: Option<i64> = None;
                                     let row_height = 44.0;
 
-                                    for (idx, record) in self.records.iter().enumerate() {
+                                    for (idx, record) in filtered_records.iter().enumerate() {
                                         let row_bg = if idx % 2 == 1 {
                                             Color32::from_rgb(40, 44, 52)
                                         } else {
@@ -732,11 +746,9 @@ impl eframe::App for App {
                                                             .color(green_color)
                                                             .size(15.0)
                                                     ));
-                                                    let balance = self.boss_balances
-                                                        .get(&record.boss)
-                                                        .unwrap_or(&0.0);
+                                                    let running_balance = running_balances.get(idx).unwrap_or(&0.0);
                                                     ui.add_sized([col_widths[3], text_height], egui::Label::new(
-                                                        RichText::new(format_money(*balance))
+                                                        RichText::new(format_money(*running_balance))
                                                             .color(text_primary)
                                                             .size(15.0)
                                                     ));
