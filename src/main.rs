@@ -683,19 +683,20 @@ impl eframe::App for App {
                         ui.separator();
                         ui.add_space(6.0);
 
-                        // 数据列表（只显示选中日期的记录）
-                        let selected_date_str = self.input_date.format("%Y-%m-%d").to_string();
+                        // 数据列表（显示选中月份的记录）
+                        let selected_month_str = format!("{}-{:02}", self.selected_year, self.selected_month);
                         let filtered_records: Vec<Record> = self.records.iter()
-                            .filter(|r| r.date == selected_date_str)
+                            .filter(|r| r.date.starts_with(&selected_month_str))
                             .cloned()
                             .collect();
 
-                        // 计算当日累计结余（running total）
+                        // 计算当月累计结余（按时间正序累计，最新记录显示总累计）
                         let mut running_balances: Vec<f64> = Vec::new();
-                        let mut running_total = 0.0;
+                        let total: f64 = filtered_records.iter().map(|r| r.income).sum();
+                        let mut remaining = total;
                         for r in &filtered_records {
-                            running_total += r.income;
-                            running_balances.push(running_total);
+                            running_balances.push(remaining);
+                            remaining -= r.income;
                         }
 
                         egui::ScrollArea::vertical()
@@ -704,11 +705,11 @@ impl eframe::App for App {
                                 if filtered_records.is_empty() {
                                     ui.add_space(80.0);
                                     ui.vertical_centered(|ui| {
-                                        ui.label(RichText::new("当日暂无记录")
+                                        ui.label(RichText::new("当月暂无记录")
                                             .color(text_secondary)
                                             .size(17.0));
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("选择其他日期或添加新记录")
+                                        ui.label(RichText::new("选择其他月份或添加新记录")
                                             .color(Color32::from_rgb(100, 105, 115))
                                             .size(13.0));
                                     });
