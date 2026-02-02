@@ -7,6 +7,9 @@ pub struct Record {
     pub date: String,
     pub boss: String,
     pub income: f64,
+    pub duration: Option<i32>,   // 服务时长(小时)
+    pub game: Option<String>,    // 游戏名称
+    pub settled: bool,           // 是否结清
 }
 
 pub struct Database {
@@ -43,13 +46,30 @@ impl Database {
             )",
             [],
         )?;
+
+        // 数据库迁移：添加新列（兼容旧数据）
+        // duration: 服务时长(小时)
+        let _ = self.conn.execute("ALTER TABLE records ADD COLUMN duration INTEGER", []);
+        // game: 游戏名称
+        let _ = self.conn.execute("ALTER TABLE records ADD COLUMN game TEXT", []);
+        // settled: 是否结清，默认0(false)
+        let _ = self.conn.execute("ALTER TABLE records ADD COLUMN settled INTEGER DEFAULT 0", []);
+
         Ok(())
     }
 
-    pub fn add_record(&self, date: &str, boss: &str, income: f64) -> Result<()> {
+    pub fn add_record(
+        &self,
+        date: &str,
+        boss: &str,
+        income: f64,
+        duration: Option<i32>,
+        game: Option<&str>,
+        settled: bool,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO records (date, boss, income) VALUES (?1, ?2, ?3)",
-            [date, boss, &income.to_string()],
+            "INSERT INTO records (date, boss, income, duration, game, settled) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![date, boss, income, duration, game, settled as i32],
         )?;
         Ok(())
     }
@@ -61,7 +81,7 @@ impl Database {
 
     pub fn get_all_records(&self) -> Result<Vec<Record>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, date, boss, income FROM records ORDER BY date DESC, id DESC"
+            "SELECT id, date, boss, income, duration, game, settled FROM records ORDER BY date DESC, id DESC"
         )?;
         let records = stmt.query_map([], |row| {
             Ok(Record {
@@ -69,6 +89,9 @@ impl Database {
                 date: row.get(1)?,
                 boss: row.get(2)?,
                 income: row.get(3)?,
+                duration: row.get(4)?,
+                game: row.get(5)?,
+                settled: row.get::<_, Option<i32>>(6)?.unwrap_or(0) != 0,
             })
         })?;
         records.collect()
@@ -107,5 +130,27 @@ impl Database {
             .filter_map(|r| r.ok())
             .collect();
         bosses
+    }
+
+    /// 获取所有游戏名称（用于自动补全）
+    pub fn get_all_games(&self) -> Vec<String> {
+        let mut stmt = self.conn
+            .prepare("SELECT DISTINCT game FROM records WHERE game IS NOT NULL AND game != '' ORDER BY game")
+            .unwrap();
+        let games = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        games
+    }
+
+    /// 更新结清状态
+    pub fn update_settled(&self, id: i64, settled: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE records SET settled = ?1 WHERE id = ?2",
+            [settled as i64, id],
+        )?;
+        Ok(())
     }
 }

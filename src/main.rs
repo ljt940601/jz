@@ -66,8 +66,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 700.0])
-            .with_min_inner_size([800.0, 550.0]),
+            .with_inner_size([1050.0, 750.0])
+            .with_min_inner_size([900.0, 650.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -109,6 +109,7 @@ struct App {
     month_balance: f64,
     boss_balances: std::collections::HashMap<String, f64>,
     boss_list: Vec<String>,
+    game_list: Vec<String>,
 
     // 月结余选择器
     selected_year: i32,
@@ -117,7 +118,11 @@ struct App {
     input_date: NaiveDate,
     input_boss: String,
     input_income: String,
+    input_duration: String,      // 时长输入
+    input_game: String,          // 游戏输入
+    input_settled: bool,         // 是否结清勾选
     show_boss_suggestions: bool,
+    show_game_suggestions: bool, // 游戏联想显示
 
     message: String,
     message_is_error: bool,
@@ -135,6 +140,7 @@ impl App {
         let boss_balances = Self::calc_boss_balances(&records);
 
         let boss_list = db.get_all_bosses();
+        let game_list = db.get_all_games();
 
         Self {
             db,
@@ -144,12 +150,17 @@ impl App {
             month_balance,
             boss_balances,
             boss_list,
+            game_list,
             selected_year: today.year(),
             selected_month: today.month(),
             input_date: today,
             input_boss: String::new(),
             input_income: String::new(),
+            input_duration: String::new(),
+            input_game: String::new(),
+            input_settled: false,
             show_boss_suggestions: false,
+            show_game_suggestions: false,
             message: String::new(),
             message_is_error: false,
             message_timer: 0.0,
@@ -187,6 +198,7 @@ impl App {
         self.month_balance = Self::calc_month_balance(&self.records, &year_month);
         self.boss_balances = Self::calc_boss_balances(&self.records);
         self.boss_list = self.db.get_all_bosses();
+        self.game_list = self.db.get_all_games();
     }
 
     fn show_message(&mut self, msg: &str, is_error: bool) {
@@ -217,12 +229,35 @@ impl App {
             return;
         }
 
+        // 解析时长（可为空）
+        let duration: Option<i32> = if self.input_duration.trim().is_empty() {
+            None
+        } else {
+            match self.input_duration.trim().parse::<i32>() {
+                Ok(v) if v > 0 => Some(v),
+                _ => {
+                    self.show_message("请输入有效时长", true);
+                    return;
+                }
+            }
+        };
+
+        // 游戏名称（可为空）
+        let game: Option<&str> = if self.input_game.trim().is_empty() {
+            None
+        } else {
+            Some(self.input_game.trim())
+        };
+
         let date_str = self.input_date.format("%Y-%m-%d").to_string();
-        match self.db.add_record(&date_str, self.input_boss.trim(), income) {
+        match self.db.add_record(&date_str, self.input_boss.trim(), income, duration, game, self.input_settled) {
             Ok(_) => {
                 self.show_message(&format!("已添加 ¥{:.2}", income), false);
                 self.input_boss.clear();
                 self.input_income.clear();
+                self.input_duration.clear();
+                self.input_game.clear();
+                self.input_settled = false;
                 self.refresh_data();
             }
             Err(_) => {
@@ -315,7 +350,7 @@ impl eframe::App for App {
         ctx.set_style(style);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::default().fill(bg_color).inner_margin(40.0))
+            .frame(egui::Frame::default().fill(bg_color).inner_margin(32.0))
             .show(ctx, |ui| {
                 let _w = ui.available_width();
 
@@ -408,7 +443,7 @@ impl eframe::App for App {
                 egui::Frame::default()
                     .fill(card_color)
                     .rounding(Rounding::same(14.0))
-                    .inner_margin(24.0)
+                    .inner_margin(22.0)
                     .show(ui, |ui| {
                         let inner_w = ui.available_width();
 
@@ -422,12 +457,17 @@ impl eframe::App for App {
                         let mut set_today = false;
 
                         ui.horizontal(|ui| {
-                            let col_spacing = 20.0;
-                            let btn_width = 90.0;
-                            let today_btn_width = 60.0;
-                            let date_area_width = 240.0;
-                            let remaining = inner_w - date_area_width - today_btn_width - btn_width - col_spacing * 5.0;
-                            let field_width = remaining / 2.0;
+                            let col_spacing = 10.0;
+                            let btn_width = 65.0;
+                            let today_btn_width = 46.0;
+                            let date_area_width = 200.0;
+                            let checkbox_width = 36.0;
+                            let duration_width = 56.0;
+                            let income_width = 82.0;
+                            let boss_width = 120.0;  // 约6个中文字
+                            let game_width = 100.0;  // 约5个中文字
+                            // 间距：日期-今天(6) + 7个标准间距(10*7=70) = 76
+                            let total_spacing = 6.0 + col_spacing * 7.0;
 
                             // 日期选择
                             ui.vertical(|ui| {
@@ -440,42 +480,42 @@ impl eframe::App for App {
                                     .fill(input_bg)
                                     .rounding(Rounding::same(8.0))
                                     .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
-                                    .inner_margin(egui::Margin::symmetric(8.0, 0.0))
+                                    .inner_margin(egui::Margin::symmetric(4.0, 0.0))
                                     .show(ui, |ui| {
                                         ui.set_height(input_height);
                                         ui.horizontal_centered(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 6.0;
+                                            ui.spacing_mut().item_spacing.x = 2.0;
 
                                             // 年份选择
                                             let current_year = Local::now().year();
                                             egui::ComboBox::from_id_source("year_select")
-                                                .width(72.0)
-                                                .selected_text(RichText::new(format!("{}", new_year)).size(input_font_size).color(dark_text))
+                                                .width(58.0)
+                                                .selected_text(RichText::new(format!("{}", new_year)).size(14.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
                                                     for y in (current_year - 5)..=(current_year + 1) {
                                                         ui.selectable_value(&mut new_year, y, format!("{}", y));
                                                     }
                                                 });
 
-                                            ui.label(RichText::new("-").size(input_font_size).color(text_secondary));
+                                            ui.label(RichText::new("-").size(14.0).color(text_secondary));
 
                                             // 月份选择
                                             egui::ComboBox::from_id_source("month_select")
-                                                .width(52.0)
-                                                .selected_text(RichText::new(format!("{:02}", new_month)).size(input_font_size).color(dark_text))
+                                                .width(40.0)
+                                                .selected_text(RichText::new(format!("{:02}", new_month)).size(14.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
                                                     for m in 1..=12u32 {
                                                         ui.selectable_value(&mut new_month, m, format!("{:02}", m));
                                                     }
                                                 });
 
-                                            ui.label(RichText::new("-").size(input_font_size).color(text_secondary));
+                                            ui.label(RichText::new("-").size(14.0).color(text_secondary));
 
                                             // 日期选择
                                             let max_days = days_in_month(new_year, new_month);
                                             egui::ComboBox::from_id_source("day_select")
-                                                .width(52.0)
-                                                .selected_text(RichText::new(format!("{:02}", new_day)).size(input_font_size).color(dark_text))
+                                                .width(40.0)
+                                                .selected_text(RichText::new(format!("{:02}", new_day)).size(14.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
                                                     for d in 1..=max_days {
                                                         ui.selectable_value(&mut new_day, d, format!("{:02}", d));
@@ -485,17 +525,17 @@ impl eframe::App for App {
                                     });
                             });
 
-                            ui.add_space(col_spacing - 12.0);
+                            ui.add_space(6.0);
 
                             // 今天按钮
                             ui.vertical(|ui| {
                                 ui.add_space(20.0 + 6.0);
                                 let today_btn = egui::Button::new(
-                                    RichText::new("今天").size(14.0).color(accent_color)
+                                    RichText::new("今天").size(13.0).color(accent_color)
                                 )
                                 .fill(Color32::TRANSPARENT)
                                 .stroke(Stroke::new(1.0, accent_color))
-                                .rounding(Rounding::same(8.0));
+                                .rounding(Rounding::same(6.0));
 
                                 if ui.add_sized([today_btn_width, input_height], today_btn).clicked() {
                                     set_today = true;
@@ -510,10 +550,10 @@ impl eframe::App for App {
                                 ui.add_space(6.0);
 
                                 let boss_response = ui.add_sized(
-                                    [field_width, input_height],
+                                    [boss_width, input_height],
                                     egui::TextEdit::singleline(&mut self.input_boss)
                                         .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(12.0, 8.0))
+                                        .margin(Vec2::new(8.0, 8.0))
                                 );
 
                                 // 输入框获得焦点时显示建议
@@ -522,7 +562,7 @@ impl eframe::App for App {
                                 }
 
                                 // 浮动显示建议列表
-                                let mut suggestion_clicked = false;
+                                let mut boss_suggestion_clicked = false;
                                 if self.show_boss_suggestions && !self.boss_list.is_empty() {
                                     let input_lower = self.input_boss.to_lowercase();
                                     let suggestions: Vec<_> = self.boss_list.iter()
@@ -550,7 +590,7 @@ impl eframe::App for App {
                                                     })
                                                     .inner_margin(4.0)
                                                     .show(ui, |ui| {
-                                                        ui.set_width(field_width - 8.0);
+                                                        ui.set_width(boss_width - 8.0);
                                                         for boss in &suggestions {
                                                             let btn = egui::Button::new(
                                                                 RichText::new(boss).size(14.0).color(text_primary)
@@ -559,9 +599,9 @@ impl eframe::App for App {
                                                             .stroke(Stroke::NONE)
                                                             .rounding(Rounding::same(4.0));
 
-                                                            if ui.add_sized([field_width - 16.0, 28.0], btn).clicked() {
+                                                            if ui.add_sized([boss_width - 16.0, 28.0], btn).clicked() {
                                                                 self.input_boss = boss.clone();
-                                                                suggestion_clicked = true;
+                                                                boss_suggestion_clicked = true;
                                                             }
                                                         }
                                                     });
@@ -570,10 +610,9 @@ impl eframe::App for App {
                                 }
 
                                 // 点击建议后隐藏，或者点击其他地方时隐藏
-                                if suggestion_clicked {
+                                if boss_suggestion_clicked {
                                     self.show_boss_suggestions = false;
                                 } else if self.show_boss_suggestions && !boss_response.has_focus() {
-                                    // 检查鼠标是否点击了其他地方
                                     let clicked_elsewhere = ui.ctx().input(|i| i.pointer.any_click());
                                     if clicked_elsewhere {
                                         self.show_boss_suggestions = false;
@@ -583,31 +622,134 @@ impl eframe::App for App {
 
                             ui.add_space(col_spacing);
 
-                            // 收入（限制输入长度，最多10字符：100000.00）
+                            // 游戏（带自动补全）
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("游戏").color(text_secondary).size(label_size));
+                                ui.add_space(6.0);
+
+                                let game_response = ui.add_sized(
+                                    [game_width, input_height],
+                                    egui::TextEdit::singleline(&mut self.input_game)
+                                        .font(FontId::proportional(input_font_size))
+                                        .margin(Vec2::new(8.0, 8.0))
+                                );
+
+                                // 输入框获得焦点时显示建议
+                                if game_response.gained_focus() {
+                                    self.show_game_suggestions = true;
+                                }
+
+                                // 浮动显示建议列表
+                                let mut game_suggestion_clicked = false;
+                                if self.show_game_suggestions && !self.game_list.is_empty() {
+                                    let input_lower = self.input_game.to_lowercase();
+                                    let suggestions: Vec<_> = self.game_list.iter()
+                                        .filter(|g| input_lower.is_empty() || g.to_lowercase().contains(&input_lower))
+                                        .take(6)
+                                        .cloned()
+                                        .collect();
+
+                                    if !suggestions.is_empty() {
+                                        let popup_pos = game_response.rect.left_bottom() + Vec2::new(0.0, 4.0);
+
+                                        egui::Area::new(egui::Id::new("game_suggestions"))
+                                            .order(egui::Order::Foreground)
+                                            .fixed_pos(popup_pos)
+                                            .show(ui.ctx(), |ui| {
+                                                egui::Frame::default()
+                                                    .fill(Color32::from_rgb(50, 55, 65))
+                                                    .rounding(Rounding::same(6.0))
+                                                    .stroke(Stroke::new(1.0, Color32::from_rgb(70, 75, 85)))
+                                                    .shadow(egui::epaint::Shadow {
+                                                        offset: Vec2::new(0.0, 2.0),
+                                                        blur: 8.0,
+                                                        spread: 0.0,
+                                                        color: Color32::from_black_alpha(60),
+                                                    })
+                                                    .inner_margin(4.0)
+                                                    .show(ui, |ui| {
+                                                        ui.set_width(game_width - 8.0);
+                                                        for game in &suggestions {
+                                                            let btn = egui::Button::new(
+                                                                RichText::new(game).size(14.0).color(text_primary)
+                                                            )
+                                                            .fill(Color32::TRANSPARENT)
+                                                            .stroke(Stroke::NONE)
+                                                            .rounding(Rounding::same(4.0));
+
+                                                            if ui.add_sized([game_width - 16.0, 28.0], btn).clicked() {
+                                                                self.input_game = game.clone();
+                                                                game_suggestion_clicked = true;
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                    }
+                                }
+
+                                // 点击建议后隐藏，或者点击其他地方时隐藏
+                                if game_suggestion_clicked {
+                                    self.show_game_suggestions = false;
+                                } else if self.show_game_suggestions && !game_response.has_focus() {
+                                    let clicked_elsewhere = ui.ctx().input(|i| i.pointer.any_click());
+                                    if clicked_elsewhere {
+                                        self.show_game_suggestions = false;
+                                    }
+                                }
+                            });
+
+                            ui.add_space(col_spacing);
+
+                            // 时长
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("时长/h").color(text_secondary).size(label_size));
+                                ui.add_space(6.0);
+                                ui.add_sized(
+                                    [duration_width, input_height],
+                                    egui::TextEdit::singleline(&mut self.input_duration)
+                                        .font(FontId::proportional(input_font_size))
+                                        .margin(Vec2::new(6.0, 8.0))
+                                        .char_limit(3)
+                                );
+                            });
+
+                            ui.add_space(col_spacing);
+
+                            // 收入
                             ui.vertical(|ui| {
                                 ui.label(RichText::new("收入").color(text_secondary).size(label_size));
                                 ui.add_space(6.0);
                                 ui.add_sized(
-                                    [field_width, input_height],
+                                    [income_width, input_height],
                                     egui::TextEdit::singleline(&mut self.input_income)
                                         .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(12.0, 8.0))
+                                        .margin(Vec2::new(6.0, 8.0))
                                         .char_limit(10)
                                 );
                             });
 
                             ui.add_space(col_spacing);
 
-                            // 按钮
+                            // 结清勾选框
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("结清").color(text_secondary).size(label_size));
+                                ui.add_space(6.0);
+                                ui.add_space(10.0);
+                                ui.checkbox(&mut self.input_settled, "");
+                            });
+
+                            ui.add_space(col_spacing);
+
+                            // 添加按钮
                             ui.vertical(|ui| {
                                 ui.add_space(20.0 + 6.0);
                                 let btn = egui::Button::new(
                                     RichText::new("添加")
-                                        .font(FontId::proportional(16.0))
+                                        .font(FontId::proportional(14.0))
                                         .color(Color32::WHITE)
                                 )
                                 .fill(accent_color)
-                                .rounding(Rounding::same(8.0));
+                                .rounding(Rounding::same(6.0));
 
                                 if ui.add_sized([btn_width, input_height], btn).clicked() {
                                     self.add_record();
@@ -643,20 +785,24 @@ impl eframe::App for App {
                 egui::Frame::default()
                     .fill(card_color)
                     .rounding(Rounding::same(14.0))
-                    .inner_margin(20.0)
+                    .inner_margin(22.0)
                     .show(ui, |ui| {
                         let table_w = ui.available_width();
                         ui.set_min_height(350.0);
 
                         // 固定列宽
-                        let delete_btn_width = 70.0;
-                        let table_padding = 40.0;
-                        let data_width = table_w - delete_btn_width - table_padding;
+                        let delete_btn_width = 60.0;
+                        let settled_width = 45.0;
+                        let table_padding = 30.0;
+                        let data_width = table_w - delete_btn_width - settled_width - table_padding;
                         let col_widths = [
-                            data_width * 0.22,  // 日期
-                            data_width * 0.28,  // 老板
-                            data_width * 0.24,  // 收入
-                            data_width * 0.26,  // 结余
+                            data_width * 0.15,  // 日期
+                            data_width * 0.18,  // 老板
+                            data_width * 0.20,  // 游戏
+                            data_width * 0.10,  // 时长
+                            data_width * 0.17,  // 收入
+                            data_width * 0.20,  // 结余
+                            settled_width,      // 结清
                             delete_btn_width,   // 操作
                         ];
 
@@ -669,12 +815,21 @@ impl eframe::App for App {
                                 RichText::new("老板").color(text_secondary).size(14.0)
                             ));
                             ui.add_sized([col_widths[2], 22.0], egui::Label::new(
-                                RichText::new("收入").color(text_secondary).size(14.0)
+                                RichText::new("游戏").color(text_secondary).size(14.0)
                             ));
                             ui.add_sized([col_widths[3], 22.0], egui::Label::new(
-                                RichText::new("结余").color(text_secondary).size(14.0)
+                                RichText::new("时长").color(text_secondary).size(14.0)
                             ));
                             ui.add_sized([col_widths[4], 22.0], egui::Label::new(
+                                RichText::new("收入").color(text_secondary).size(14.0)
+                            ));
+                            ui.add_sized([col_widths[5], 22.0], egui::Label::new(
+                                RichText::new("结余").color(text_secondary).size(14.0)
+                            ));
+                            ui.add_sized([col_widths[6], 22.0], egui::Label::new(
+                                RichText::new("结清").color(text_secondary).size(14.0)
+                            ));
+                            ui.add_sized([col_widths[7], 22.0], egui::Label::new(
                                 RichText::new("操作").color(text_secondary).size(14.0)
                             ));
                         });
@@ -715,6 +870,7 @@ impl eframe::App for App {
                                     });
                                 } else {
                                     let mut to_delete: Option<i64> = None;
+                                    let mut to_toggle_settled: Option<(i64, bool)> = None;
                                     let row_height = 44.0;
 
                                     for (idx, record) in filtered_records.iter().enumerate() {
@@ -732,44 +888,79 @@ impl eframe::App for App {
                                                 ui.horizontal(|ui| {
                                                     let text_height = row_height - 12.0;
 
+                                                    // 日期
                                                     ui.add_sized([col_widths[0], text_height], egui::Label::new(
                                                         RichText::new(&record.date)
                                                             .color(text_primary)
-                                                            .size(15.0)
+                                                            .size(14.0)
                                                     ));
+                                                    // 老板
                                                     ui.add_sized([col_widths[1], text_height], egui::Label::new(
                                                         RichText::new(&record.boss)
                                                             .color(text_primary)
-                                                            .size(15.0)
+                                                            .size(14.0)
                                                     ));
+                                                    // 游戏
+                                                    let game_text = record.game.as_deref().unwrap_or("-");
                                                     ui.add_sized([col_widths[2], text_height], egui::Label::new(
+                                                        RichText::new(game_text)
+                                                            .color(text_primary)
+                                                            .size(14.0)
+                                                    ));
+                                                    // 时长
+                                                    let duration_text = match record.duration {
+                                                        Some(d) if d > 0 => format!("{}h", d),
+                                                        _ => "-".to_string(),
+                                                    };
+                                                    ui.add_sized([col_widths[3], text_height], egui::Label::new(
+                                                        RichText::new(duration_text)
+                                                            .color(text_secondary)
+                                                            .size(14.0)
+                                                    ));
+                                                    // 收入
+                                                    ui.add_sized([col_widths[4], text_height], egui::Label::new(
                                                         RichText::new(format_income(record.income))
                                                             .color(green_color)
-                                                            .size(15.0)
+                                                            .size(14.0)
                                                     ));
+                                                    // 结余
                                                     let running_balance = running_balances.get(idx).unwrap_or(&0.0);
-                                                    ui.add_sized([col_widths[3], text_height], egui::Label::new(
+                                                    ui.add_sized([col_widths[5], text_height], egui::Label::new(
                                                         RichText::new(format_money(*running_balance))
                                                             .color(text_primary)
-                                                            .size(15.0)
+                                                            .size(14.0)
                                                     ));
+
+                                                    // 结清勾选框（可点击修改）
+                                                    let mut settled = record.settled;
+                                                    let checkbox_response = ui.add_sized([col_widths[6], text_height], egui::Checkbox::new(&mut settled, ""));
+                                                    if checkbox_response.changed() {
+                                                        to_toggle_settled = Some((record.id, settled));
+                                                    }
 
                                                     // 删除按钮
                                                     let btn = egui::Button::new(
                                                         RichText::new("删除")
-                                                            .size(13.0)
+                                                            .size(12.0)
                                                             .color(danger_color)
                                                     )
                                                     .fill(Color32::TRANSPARENT)
                                                     .stroke(Stroke::new(1.0, danger_color))
                                                     .rounding(Rounding::same(5.0))
-                                                    .min_size(Vec2::new(52.0, 28.0));
+                                                    .min_size(Vec2::new(48.0, 26.0));
 
                                                     if ui.add(btn).clicked() {
                                                         to_delete = Some(record.id);
                                                     }
                                                 });
                                             });
+                                    }
+
+                                    // 处理结清状态更新
+                                    if let Some((id, new_settled)) = to_toggle_settled {
+                                        if self.db.update_settled(id, new_settled).is_ok() {
+                                            self.refresh_data();
+                                        }
                                     }
 
                                     if let Some(id) = to_delete {
