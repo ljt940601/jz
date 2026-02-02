@@ -67,7 +67,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([980.0, 750.0])
-            .with_min_inner_size([900.0, 650.0]),
+            .with_min_inner_size([960.0, 680.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -229,12 +229,12 @@ impl App {
             return;
         }
 
-        // 解析时长（可为空）
-        let duration: Option<i32> = if self.input_duration.trim().is_empty() {
+        // 解析时长（可为空，支持小数）
+        let duration: Option<f64> = if self.input_duration.trim().is_empty() {
             None
         } else {
-            match self.input_duration.trim().parse::<i32>() {
-                Ok(v) if v > 0 => Some(v),
+            match self.input_duration.trim().parse::<f64>() {
+                Ok(v) if v > 0.0 && v.is_finite() => Some((v * 10.0).round() / 10.0), // 保留一位小数
                 _ => {
                     self.show_message("请输入有效时长", true);
                     return;
@@ -458,9 +458,8 @@ impl eframe::App for App {
                     .rounding(Rounding::same(14.0))
                     .inner_margin(22.0)
                     .show(ui, |ui| {
-                        // 使用 with_layout 强制填满宽度
-                        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true), |ui| {
-                            ui.set_min_width(card_inner_w);
+                        // 强制分配完整宽度，确保Frame扩展到与表格区域一致
+                        ui.allocate_at_least(Vec2::new(card_inner_w, 0.0), egui::Sense::hover());
                         let input_height = 40.0;
                         let label_size = 13.0;
                         let input_font_size = 15.0;
@@ -494,6 +493,7 @@ impl eframe::App for App {
 
                             // 日期列
                             ui.vertical(|ui| {
+                                ui.set_width(date_width);
                                 ui.label(RichText::new("日期").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 egui::Frame::default()
@@ -539,6 +539,7 @@ impl eframe::App for App {
 
                             // 今天按钮
                             ui.vertical(|ui| {
+                                ui.set_width(today_btn_width);
                                 ui.add_space(17.0 + 4.0);
                                 let today_btn = egui::Button::new(RichText::new("今天").size(13.0).color(accent_color))
                                     .fill(Color32::TRANSPARENT)
@@ -551,6 +552,7 @@ impl eframe::App for App {
 
                             // 老板列
                             ui.vertical(|ui| {
+                                ui.set_width(boss_width);
                                 ui.label(RichText::new("老板").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 let boss_response = ui.add_sized(
@@ -603,6 +605,7 @@ impl eframe::App for App {
 
                             // 游戏列
                             ui.vertical(|ui| {
+                                ui.set_width(game_width);
                                 ui.label(RichText::new("游戏").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 let game_response = ui.add_sized(
@@ -654,18 +657,20 @@ impl eframe::App for App {
 
                             // 时长列
                             ui.vertical(|ui| {
+                                ui.set_width(duration_width);
                                 ui.label(RichText::new("时长/h").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 ui.add_sized([duration_width, input_height],
                                     egui::TextEdit::singleline(&mut self.input_duration)
                                         .font(FontId::proportional(input_font_size))
                                         .margin(Vec2::new(6.0, 8.0))
-                                        .char_limit(3)
+                                        .char_limit(5)
                                 );
                             });
 
                             // 收入列
                             ui.vertical(|ui| {
+                                ui.set_width(income_width);
                                 ui.label(RichText::new("收入").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 ui.add_sized([income_width, input_height],
@@ -678,17 +683,16 @@ impl eframe::App for App {
 
                             // 结清列
                             ui.vertical(|ui| {
+                                ui.set_width(checkbox_width);
                                 ui.label(RichText::new("结清").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 ui.add_space(10.0);
                                 ui.add_sized([checkbox_width, 20.0], egui::Checkbox::new(&mut self.input_settled, ""));
                             });
 
-                            // 弹性空间，将添加按钮推到最右边
-                            ui.add_space(ui.available_width() - btn_width);
-
                             // 添加按钮
                             ui.vertical(|ui| {
+                                ui.set_width(btn_width);
                                 ui.add_space(17.0 + 4.0);
                                 let btn = egui::Button::new(RichText::new("添加").font(FontId::proportional(14.0)).color(Color32::WHITE))
                                     .fill(accent_color)
@@ -697,6 +701,12 @@ impl eframe::App for App {
                                     self.add_record();
                                 }
                             });
+
+                            // 填充剩余空间，确保horizontal布局填满完整宽度
+                            let remaining = ui.available_width();
+                            if remaining > 0.0 {
+                                ui.add_space(remaining);
+                            }
                         });
 
                         // 处理日期变化
@@ -709,7 +719,14 @@ impl eframe::App for App {
                                 self.input_date = date;
                             }
                         }
-                        }); // with_layout
+
+                        // 强制扩展Frame边界到完整宽度
+                        let current_rect = ui.min_rect();
+                        let target_rect = egui::Rect::from_min_size(
+                            current_rect.min,
+                            Vec2::new(card_inner_w, current_rect.height())
+                        );
+                        ui.expand_to_include_rect(target_rect);
                     });
 
                 // 消息提示（浮动显示）
@@ -853,7 +870,13 @@ impl eframe::App for App {
                                                     ));
                                                     // 时长
                                                     let duration_text = match record.duration {
-                                                        Some(d) if d > 0 => format!("{}h", d),
+                                                        Some(d) if d > 0.0 => {
+                                                            if d.fract() == 0.0 {
+                                                                format!("{}h", d as i32)
+                                                            } else {
+                                                                format!("{:.1}h", d)
+                                                            }
+                                                        },
                                                         _ => "-".to_string(),
                                                     };
                                                     ui.add_sized([col_widths[3], text_height], egui::Label::new(

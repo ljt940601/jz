@@ -7,7 +7,7 @@ pub struct Record {
     pub date: String,
     pub boss: String,
     pub income: f64,
-    pub duration: Option<i32>,   // 服务时长(小时)
+    pub duration: Option<f64>,   // 服务时长(小时)，支持小数
     pub game: Option<String>,    // 游戏名称
     pub settled: bool,           // 是否结清
 }
@@ -63,7 +63,7 @@ impl Database {
         date: &str,
         boss: &str,
         income: f64,
-        duration: Option<i32>,
+        duration: Option<f64>,
         game: Option<&str>,
         settled: bool,
     ) -> Result<()> {
