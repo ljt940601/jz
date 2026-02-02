@@ -7,6 +7,7 @@ use db::{Database, Record};
 use eframe::egui::{self, Color32, FontId, RichText, Vec2, Rounding, Stroke};
 use std::fs::File;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 fn get_lock_file_path() -> PathBuf {
     let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -66,8 +67,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 750.0])
-            .with_min_inner_size([960.0, 680.0]),
+            .with_inner_size([980.0, 800.0])
+            .with_min_inner_size([960.0, 700.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -127,6 +128,12 @@ struct App {
     message: String,
     message_is_error: bool,
     message_timer: f32,
+
+    // 计时器
+    timer_running: bool,
+    timer_start_instant: Option<Instant>,
+    timer_accumulated: Duration,
+    timer_ended: bool,  // 是否已结束（结束后才能重置）
 }
 
 impl App {
@@ -164,6 +171,10 @@ impl App {
             message: String::new(),
             message_is_error: false,
             message_timer: 0.0,
+            timer_running: false,
+            timer_start_instant: None,
+            timer_accumulated: Duration::ZERO,
+            timer_ended: false,
         }
     }
 
@@ -329,6 +340,11 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
 
+        // 计时器运行时持续刷新
+        if self.timer_running {
+            ctx.request_repaint();
+        }
+
         // 颜色定义
         let bg_color = Color32::from_rgb(25, 28, 32);
         let card_color = Color32::from_rgb(35, 39, 45);
@@ -338,6 +354,166 @@ impl eframe::App for App {
         let text_primary = Color32::from_rgb(230, 230, 235);
         let text_secondary = Color32::from_rgb(140, 145, 155);
         let danger_color = Color32::from_rgb(220, 80, 80);
+
+        // ===== 底部计时器栏（固定在底部）=====
+        egui::TopBottomPanel::bottom("timer_panel")
+            .frame(egui::Frame::default().fill(bg_color).inner_margin(egui::Margin { left: 32.0, right: 32.0, top: 8.0, bottom: 16.0 }))
+            .show(ctx, |ui| {
+                // 与内容区域等宽居中
+                let content_width = 880.0;
+                let available = ui.available_width();
+                let side_margin = ((available - content_width) / 2.0 - 35.0).max(0.0);
+
+                ui.horizontal(|ui| {
+                    ui.add_space(side_margin);
+                    ui.vertical(|ui| {
+                        ui.set_width(content_width);
+                        egui::Frame::default()
+                            .fill(card_color)
+                            .rounding(Rounding::same(10.0))
+                            .inner_margin(egui::Margin::symmetric(20.0, 14.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                            // 计算当前显示时间
+                            let elapsed = if self.timer_running {
+                                if let Some(start) = self.timer_start_instant {
+                                    self.timer_accumulated + start.elapsed()
+                                } else {
+                                    self.timer_accumulated
+                                }
+                            } else {
+                                self.timer_accumulated
+                            };
+
+                            let total_secs = elapsed.as_secs();
+                            let hours = total_secs / 3600;
+                            let minutes = (total_secs % 3600) / 60;
+                            let seconds = total_secs % 60;
+                            let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+
+                            // 判断计时器状态
+                            let is_initial = !self.timer_running && self.timer_accumulated.is_zero() && !self.timer_ended;
+                            let is_running = self.timer_running;
+                            let is_paused = !self.timer_running && !self.timer_accumulated.is_zero() && !self.timer_ended;
+                            let is_ended = self.timer_ended;
+
+                            // 左侧：标签
+                            ui.label(RichText::new("计时").size(14.0).color(text_secondary));
+                            ui.add_space(12.0);
+
+                            // 时间显示
+                            let time_color = if is_running {
+                                accent_color
+                            } else if is_paused {
+                                Color32::from_rgb(230, 180, 80)
+                            } else if is_ended {
+                                text_primary  // 已结束显示白色
+                            } else {
+                                text_secondary
+                            };
+                            ui.label(RichText::new(time_str)
+                                .font(FontId::monospace(24.0))
+                                .color(time_color));
+
+                            ui.add_space(20.0);
+
+                            // 按钮区域
+                            let btn_height = 30.0;
+                            let btn_width = 56.0;
+
+                            // 开始按钮（仅初始状态可用）
+                            if is_initial {
+                                let start_btn = egui::Button::new(RichText::new("开始").size(13.0).color(Color32::WHITE))
+                                    .fill(green_color)
+                                    .rounding(Rounding::same(6.0));
+                                if ui.add_sized([btn_width, btn_height], start_btn).clicked() {
+                                    self.timer_running = true;
+                                    self.timer_start_instant = Some(Instant::now());
+                                    self.timer_ended = false;
+                                }
+                            } else {
+                                let disabled_btn = egui::Button::new(RichText::new("开始").size(13.0).color(Color32::from_rgb(80, 85, 95)))
+                                    .fill(Color32::from_rgb(45, 48, 55))
+                                    .rounding(Rounding::same(6.0));
+                                ui.add_sized([btn_width, btn_height], disabled_btn);
+                            }
+
+                            ui.add_space(6.0);
+
+                            // 暂停/继续按钮（运行中或暂停中可用）
+                            if is_running {
+                                let pause_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::WHITE))
+                                    .fill(Color32::from_rgb(230, 180, 80))
+                                    .rounding(Rounding::same(6.0));
+                                if ui.add_sized([btn_width, btn_height], pause_btn).clicked() {
+                                    if let Some(start) = self.timer_start_instant {
+                                        self.timer_accumulated += start.elapsed();
+                                    }
+                                    self.timer_running = false;
+                                    self.timer_start_instant = None;
+                                }
+                            } else if is_paused {
+                                let resume_btn = egui::Button::new(RichText::new("继续").size(13.0).color(Color32::WHITE))
+                                    .fill(accent_color)
+                                    .rounding(Rounding::same(6.0));
+                                if ui.add_sized([btn_width, btn_height], resume_btn).clicked() {
+                                    self.timer_running = true;
+                                    self.timer_start_instant = Some(Instant::now());
+                                }
+                            } else {
+                                let disabled_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::from_rgb(80, 85, 95)))
+                                    .fill(Color32::from_rgb(45, 48, 55))
+                                    .rounding(Rounding::same(6.0));
+                                ui.add_sized([btn_width, btn_height], disabled_btn);
+                            }
+
+                            ui.add_space(6.0);
+
+                            // 结束按钮（运行中或暂停中可用，结束后禁用）
+                            if is_running || is_paused {
+                                let end_btn = egui::Button::new(RichText::new("结束").size(13.0).color(danger_color))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0, danger_color))
+                                    .rounding(Rounding::same(6.0));
+                                if ui.add_sized([btn_width, btn_height], end_btn).clicked() {
+                                    // 结束：停止计时但保留时间
+                                    if let Some(start) = self.timer_start_instant {
+                                        self.timer_accumulated += start.elapsed();
+                                    }
+                                    self.timer_running = false;
+                                    self.timer_start_instant = None;
+                                    self.timer_ended = true;
+                                }
+                            } else {
+                                let disabled_btn = egui::Button::new(RichText::new("结束").size(13.0).color(Color32::from_rgb(80, 85, 95)))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
+                                    .rounding(Rounding::same(6.0));
+                                ui.add_sized([btn_width, btn_height], disabled_btn);
+                            }
+
+                            ui.add_space(6.0);
+
+                            // 重置按钮（仅结束后可用）
+                            if is_ended {
+                                let reset_btn = egui::Button::new(RichText::new("重置").size(13.0).color(text_secondary))
+                                    .fill(input_bg)
+                                    .rounding(Rounding::same(6.0));
+                                if ui.add_sized([btn_width, btn_height], reset_btn).clicked() {
+                                    self.timer_accumulated = Duration::ZERO;
+                                    self.timer_ended = false;
+                                }
+                            } else {
+                                let disabled_btn = egui::Button::new(RichText::new("重置").size(13.0).color(Color32::from_rgb(80, 85, 95)))
+                                    .fill(Color32::from_rgb(45, 48, 55))
+                                    .rounding(Rounding::same(6.0));
+                                ui.add_sized([btn_width, btn_height], disabled_btn);
+                            }
+                                });
+                            });
+                    });
+                });
+            });
 
         // 设置全局样式
         let mut style = (*ctx.style()).clone();
@@ -453,13 +629,14 @@ impl eframe::App for App {
 
                 // ===== 输入卡片 =====
                 let card_inner_w = cards_width - 44.0;
-                egui::Frame::default()
-                    .fill(card_color)
-                    .rounding(Rounding::same(14.0))
-                    .inner_margin(22.0)
-                    .show(ui, |ui| {
-                        // 强制分配完整宽度，确保Frame扩展到与表格区域一致
-                        ui.allocate_at_least(Vec2::new(card_inner_w, 0.0), egui::Sense::hover());
+                ui.vertical(|ui| {
+                    ui.set_width(cards_width);
+                    egui::Frame::default()
+                        .fill(card_color)
+                        .rounding(Rounding::same(14.0))
+                        .inner_margin(22.0)
+                        .show(ui, |ui| {
+                            ui.set_width(card_inner_w);
                         let input_height = 40.0;
                         let label_size = 13.0;
                         let input_font_size = 15.0;
@@ -701,13 +878,7 @@ impl eframe::App for App {
                                     self.add_record();
                                 }
                             });
-
-                            // 填充剩余空间，确保horizontal布局填满完整宽度
-                            let remaining = ui.available_width();
-                            if remaining > 0.0 {
-                                ui.add_space(remaining);
-                            }
-                        });
+                            }); // 结束 vertical, horizontal
 
                         // 处理日期变化
                         if set_today {
@@ -719,25 +890,18 @@ impl eframe::App for App {
                                 self.input_date = date;
                             }
                         }
-
-                        // 强制扩展Frame边界到完整宽度
-                        let current_rect = ui.min_rect();
-                        let target_rect = egui::Rect::from_min_size(
-                            current_rect.min,
-                            Vec2::new(card_inner_w, current_rect.height())
-                        );
-                        ui.expand_to_include_rect(target_rect);
                     });
+                });
 
-                // 消息提示（浮动显示）
-                if !self.message.is_empty() {
-                    ui.add_space(8.0);
-                    let color = if self.message_is_error { danger_color } else { green_color };
-                    ui.label(RichText::new(&self.message).color(color).size(14.0));
-                    ui.add_space(16.0);
-                } else {
+                //消息提示（浮动显示）
+                // if !self.message.is_empty() {
+                //     ui.add_space(8.0);
+                //     let color = if self.message_is_error { danger_color } else { green_color };
+                //     ui.label(RichText::new(&self.message).color(color).size(14.0));
+                //     ui.add_space(16.0);
+                // } else {
                     ui.add_space(24.0);
-                }
+                // }
 
                 // ===== 表格区域 =====
                 egui::Frame::default()
