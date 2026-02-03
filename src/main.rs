@@ -68,7 +68,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([980.0, 800.0])
-            .with_min_inner_size([960.0, 700.0]),
+            .with_min_inner_size([960.0, 800.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -362,7 +362,7 @@ impl eframe::App for App {
                 // 与内容区域等宽居中
                 let content_width = 880.0;
                 let available = ui.available_width();
-                let side_margin = ((available - content_width) / 2.0 - 35.0).max(0.0);
+                let side_margin = ((available - content_width) / 2.0).max(0.0);
 
                 ui.horizontal(|ui| {
                     ui.add_space(side_margin);
@@ -531,8 +531,7 @@ impl eframe::App for App {
                 // 固定内容宽度，居中显示
                 let content_width = 880.0;
                 let available = ui.available_width();
-                // 减少左边距来补偿egui布局的偏移
-                let side_margin = ((available - content_width) / 2.0 - 35.0).max(0.0);
+                let side_margin = ((available - content_width) / 2.0).max(0.0);
 
                 ui.horizontal(|ui| {
                     ui.add_space(side_margin);
@@ -904,22 +903,25 @@ impl eframe::App for App {
                 // }
 
                 // ===== 表格区域 =====
-                egui::Frame::default()
-                    .fill(card_color)
-                    .rounding(Rounding::same(14.0))
-                    .inner_margin(22.0)
-                    .show(ui, |ui| {
-                        ui.set_width(cards_width - 44.0);  // 强制固定宽度，与输入卡片一致
+                ui.vertical(|ui| {
+                    ui.set_width(cards_width);
+                    egui::Frame::default()
+                        .fill(card_color)
+                        .rounding(Rounding::same(14.0))
+                        .inner_margin(22.0)
+                        .show(ui, |ui| {
+                            ui.set_width(cards_width - 44.0);  // 强制固定宽度，与输入卡片一致
                         let table_w = cards_width - 44.0;
                         // 让表格占据剩余所有高度
                         let remaining_height = ui.available_height();
                         ui.set_min_height(remaining_height.max(400.0));
 
                         // 固定列宽
+                        let col_spacing = 10.0;  // 与输入卡片保持一致
                         let delete_btn_width = 60.0;
                         let settled_width = 45.0;
-                        let table_padding = 30.0;
-                        let data_width = table_w - delete_btn_width - settled_width - table_padding;
+                        let spacing_total = col_spacing * 7.0;  // 8列有7个间距
+                        let data_width = table_w - delete_btn_width - settled_width - spacing_total;
                         let col_widths = [
                             data_width * 0.15,  // 日期
                             data_width * 0.18,  // 老板
@@ -933,6 +935,7 @@ impl eframe::App for App {
 
                         // 表头
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = col_spacing;
                             ui.add_sized([col_widths[0], 22.0], egui::Label::new(
                                 RichText::new("日期").color(text_secondary).size(14.0)
                             ));
@@ -1011,6 +1014,7 @@ impl eframe::App for App {
                                             .inner_margin(egui::Margin::symmetric(4.0, 6.0))
                                             .show(ui, |ui| {
                                                 ui.horizontal(|ui| {
+                                                    ui.spacing_mut().item_spacing.x = col_spacing;
                                                     let text_height = row_height - 12.0;
 
                                                     // 日期
@@ -1100,6 +1104,7 @@ impl eframe::App for App {
                                 }
                             });
                     });
+                }); // vertical for table card
                     }); // vertical
                 }); // horizontal for centering
             });
