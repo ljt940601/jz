@@ -9,6 +9,60 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+// ===== UI 主题配置 =====
+struct Theme {
+    bg_color: Color32,
+    card_color: Color32,
+    input_bg: Color32,
+    accent_color: Color32,
+    green_color: Color32,
+    text_primary: Color32,
+    text_secondary: Color32,
+    danger_color: Color32,
+    warning_color: Color32,
+    disabled_text: Color32,
+    disabled_bg: Color32,
+}
+
+impl Theme {
+    fn default() -> Self {
+        Self {
+            bg_color: Color32::from_rgb(25, 28, 32),
+            card_color: Color32::from_rgb(35, 39, 45),
+            input_bg: Color32::from_rgb(45, 50, 58),
+            accent_color: Color32::from_rgb(64, 169, 255),
+            green_color: Color32::from_rgb(82, 196, 126),
+            text_primary: Color32::from_rgb(230, 230, 235),
+            text_secondary: Color32::from_rgb(140, 145, 155),
+            danger_color: Color32::from_rgb(220, 80, 80),
+            warning_color: Color32::from_rgb(230, 180, 80),
+            disabled_text: Color32::from_rgb(80, 85, 95),
+            disabled_bg: Color32::from_rgb(45, 48, 55),
+        }
+    }
+}
+
+// ===== 布局常量配置 =====
+struct LayoutConfig {
+    content_width: f32,
+    panel_margin: f32,
+    card_rounding: f32,
+    card_inner_margin: f32,
+    col_spacing: f32,
+}
+
+impl LayoutConfig {
+    fn default() -> Self {
+        Self {
+            content_width: 880.0,
+            panel_margin: 32.0,
+            card_rounding: 14.0,
+            card_inner_margin: 22.0,
+            col_spacing: 10.0,
+        }
+    }
+}
+
 fn get_lock_file_path() -> PathBuf {
     let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("jz");
@@ -18,8 +72,6 @@ fn get_lock_file_path() -> PathBuf {
 }
 
 fn try_lock() -> Option<File> {
-    use std::io::Write;
-
     let lock_path = get_lock_file_path();
 
     // 尝试以独占方式打开文件
@@ -34,7 +86,6 @@ fn try_lock() -> Option<File> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        use std::mem::zeroed;
 
         #[link(name = "kernel32")]
         extern "system" {
@@ -345,22 +396,31 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
 
-        // 颜色定义
-        let bg_color = Color32::from_rgb(25, 28, 32);
-        let card_color = Color32::from_rgb(35, 39, 45);
-        let input_bg = Color32::from_rgb(45, 50, 58);
-        let accent_color = Color32::from_rgb(64, 169, 255);
-        let green_color = Color32::from_rgb(82, 196, 126);
-        let text_primary = Color32::from_rgb(230, 230, 235);
-        let text_secondary = Color32::from_rgb(140, 145, 155);
-        let danger_color = Color32::from_rgb(220, 80, 80);
+        // 加载主题和布局配置
+        let theme = Theme::default();
+        let layout = LayoutConfig::default();
+
+        // 解构主题颜色以保持代码兼容性
+        let bg_color = theme.bg_color;
+        let card_color = theme.card_color;
+        let input_bg = theme.input_bg;
+        let accent_color = theme.accent_color;
+        let green_color = theme.green_color;
+        let text_primary = theme.text_primary;
+        let text_secondary = theme.text_secondary;
+        let danger_color = theme.danger_color;
 
         // ===== 底部计时器栏（固定在底部）=====
         egui::TopBottomPanel::bottom("timer_panel")
-            .frame(egui::Frame::default().fill(bg_color).inner_margin(egui::Margin { left: 32.0, right: 32.0, top: 8.0, bottom: 16.0 }))
+            .frame(egui::Frame::default().fill(bg_color).inner_margin(egui::Margin {
+                left: layout.panel_margin,
+                right: layout.panel_margin,
+                top: 8.0,
+                bottom: 16.0
+            }))
             .show(ctx, |ui| {
                 // 与内容区域等宽居中
-                let content_width = 880.0;
+                let content_width = layout.content_width;
                 let available = ui.available_width();
                 let side_margin = ((available - content_width) / 2.0).max(0.0);
 
@@ -405,9 +465,9 @@ impl eframe::App for App {
                             let time_color = if is_running {
                                 accent_color
                             } else if is_paused {
-                                Color32::from_rgb(230, 180, 80)
+                                theme.warning_color
                             } else if is_ended {
-                                text_primary  // 已结束显示白色
+                                text_primary
                             } else {
                                 text_secondary
                             };
@@ -432,8 +492,8 @@ impl eframe::App for App {
                                     self.timer_ended = false;
                                 }
                             } else {
-                                let disabled_btn = egui::Button::new(RichText::new("开始").size(13.0).color(Color32::from_rgb(80, 85, 95)))
-                                    .fill(Color32::from_rgb(45, 48, 55))
+                                let disabled_btn = egui::Button::new(RichText::new("开始").size(13.0).color(theme.disabled_text))
+                                    .fill(theme.disabled_bg)
                                     .rounding(Rounding::same(6.0));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
@@ -443,7 +503,7 @@ impl eframe::App for App {
                             // 暂停/继续按钮（运行中或暂停中可用）
                             if is_running {
                                 let pause_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::WHITE))
-                                    .fill(Color32::from_rgb(230, 180, 80))
+                                    .fill(theme.warning_color)
                                     .rounding(Rounding::same(6.0));
                                 if ui.add_sized([btn_width, btn_height], pause_btn).clicked() {
                                     if let Some(start) = self.timer_start_instant {
@@ -461,8 +521,8 @@ impl eframe::App for App {
                                     self.timer_start_instant = Some(Instant::now());
                                 }
                             } else {
-                                let disabled_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::from_rgb(80, 85, 95)))
-                                    .fill(Color32::from_rgb(45, 48, 55))
+                                let disabled_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(theme.disabled_text))
+                                    .fill(theme.disabled_bg)
                                     .rounding(Rounding::same(6.0));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
@@ -485,7 +545,7 @@ impl eframe::App for App {
                                     self.timer_ended = true;
                                 }
                             } else {
-                                let disabled_btn = egui::Button::new(RichText::new("结束").size(13.0).color(Color32::from_rgb(80, 85, 95)))
+                                let disabled_btn = egui::Button::new(RichText::new("结束").size(13.0).color(theme.disabled_text))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
                                     .rounding(Rounding::same(6.0));
@@ -504,8 +564,8 @@ impl eframe::App for App {
                                     self.timer_ended = false;
                                 }
                             } else {
-                                let disabled_btn = egui::Button::new(RichText::new("重置").size(13.0).color(Color32::from_rgb(80, 85, 95)))
-                                    .fill(Color32::from_rgb(45, 48, 55))
+                                let disabled_btn = egui::Button::new(RichText::new("重置").size(13.0).color(theme.disabled_text))
+                                    .fill(theme.disabled_bg)
                                     .rounding(Rounding::same(6.0));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
@@ -526,10 +586,10 @@ impl eframe::App for App {
         ctx.set_style(style);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::default().fill(bg_color).inner_margin(32.0))
+            .frame(egui::Frame::default().fill(bg_color).inner_margin(layout.panel_margin))
             .show(ctx, |ui| {
                 // 固定内容宽度，居中显示
-                let content_width = 880.0;
+                let content_width = layout.content_width;
                 let available = ui.available_width();
                 let side_margin = ((available - content_width) / 2.0).max(0.0);
 
@@ -627,19 +687,19 @@ impl eframe::App for App {
                 let cards_width = ui.available_width();
 
                 // ===== 输入卡片 =====
-                let card_inner_w = cards_width - 44.0;
+                let card_inner_w = cards_width - (layout.card_inner_margin * 2.0);
                 ui.vertical(|ui| {
                     ui.set_width(cards_width);
                     egui::Frame::default()
                         .fill(card_color)
-                        .rounding(Rounding::same(14.0))
-                        .inner_margin(22.0)
+                        .rounding(Rounding::same(layout.card_rounding))
+                        .inner_margin(layout.card_inner_margin)
                         .show(ui, |ui| {
                             ui.set_width(card_inner_w);
                         let input_height = 40.0;
                         let label_size = 13.0;
                         let input_font_size = 15.0;
-                        let col_spacing = 10.0;
+                        let col_spacing = layout.col_spacing;
 
                         // 固定宽度元素
                         let date_width = 175.0;  // 日期选择框
@@ -892,32 +952,25 @@ impl eframe::App for App {
                     });
                 });
 
-                //消息提示（浮动显示）
-                // if !self.message.is_empty() {
-                //     ui.add_space(8.0);
-                //     let color = if self.message_is_error { danger_color } else { green_color };
-                //     ui.label(RichText::new(&self.message).color(color).size(14.0));
-                //     ui.add_space(16.0);
-                // } else {
-                    ui.add_space(24.0);
-                // }
+                ui.add_space(24.0);
 
                 // ===== 表格区域 =====
                 ui.vertical(|ui| {
                     ui.set_width(cards_width);
                     egui::Frame::default()
                         .fill(card_color)
-                        .rounding(Rounding::same(14.0))
-                        .inner_margin(22.0)
+                        .rounding(Rounding::same(layout.card_rounding))
+                        .inner_margin(layout.card_inner_margin)
                         .show(ui, |ui| {
-                            ui.set_width(cards_width - 44.0);  // 强制固定宽度，与输入卡片一致
-                        let table_w = cards_width - 44.0;
+                            let table_inner_w = cards_width - (layout.card_inner_margin * 2.0);
+                            ui.set_width(table_inner_w);
+                        let table_w = table_inner_w;
                         // 让表格占据剩余所有高度
                         let remaining_height = ui.available_height();
                         ui.set_min_height(remaining_height.max(400.0));
 
                         // 固定列宽
-                        let col_spacing = 10.0;  // 与输入卡片保持一致
+                        let col_spacing = layout.col_spacing;
                         let delete_btn_width = 60.0;
                         let settled_width = 45.0;
                         let spacing_total = col_spacing * 7.0;  // 8列有7个间距
