@@ -428,11 +428,16 @@ impl eframe::App for App {
                     ui.add_space(side_margin);
                     ui.vertical(|ui| {
                         ui.set_width(content_width);
-                        egui::Frame::default()
-                            .fill(card_color)
-                            .rounding(Rounding::same(10.0))
-                            .inner_margin(egui::Margin::symmetric(20.0, 14.0))
-                            .show(ui, |ui| {
+                        // 获取实际卡片宽度，与表格对齐
+                        let timer_card_width = ui.available_width();
+                        ui.vertical(|ui| {
+                            ui.set_width(timer_card_width);
+                            egui::Frame::default()
+                                .fill(Color32::TRANSPARENT)  // 透明背景
+                                .stroke(Stroke::new(1.0, accent_color))  // 蓝色细边框
+                                .rounding(Rounding::same(layout.card_rounding))  // 使用统一圆角
+                                .inner_margin(egui::Margin::symmetric(layout.card_inner_margin, 16.0))  // 减小上下边距控制高度
+                                .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                             // 计算当前显示时间
                             let elapsed = if self.timer_running {
@@ -459,9 +464,9 @@ impl eframe::App for App {
 
                             // 左侧：标签
                             ui.label(RichText::new("计时").size(14.0).color(text_secondary));
-                            ui.add_space(12.0);
+                            ui.add_space(16.0);
 
-                            // 时间显示
+                            // 时间显示（放大字体，更突出）
                             let time_color = if is_running {
                                 accent_color
                             } else if is_paused {
@@ -472,10 +477,10 @@ impl eframe::App for App {
                                 text_secondary
                             };
                             ui.label(RichText::new(time_str)
-                                .font(FontId::monospace(24.0))
+                                .font(FontId::monospace(32.0))  // 从24放大到32
                                 .color(time_color));
 
-                            ui.add_space(20.0);
+                            ui.add_space(24.0);
 
                             // 按钮区域
                             let btn_height = 30.0;
@@ -498,7 +503,7 @@ impl eframe::App for App {
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
-                            ui.add_space(6.0);
+                            ui.add_space(12.0);  // 增加按钮间距
 
                             // 暂停/继续按钮（运行中或暂停中可用）
                             if is_running {
@@ -527,7 +532,7 @@ impl eframe::App for App {
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
-                            ui.add_space(6.0);
+                            ui.add_space(12.0);  // 增加按钮间距
 
                             // 结束按钮（运行中或暂停中可用，结束后禁用）
                             if is_running || is_paused {
@@ -552,7 +557,7 @@ impl eframe::App for App {
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
-                            ui.add_space(6.0);
+                            ui.add_space(12.0);  // 增加按钮间距
 
                             // 重置按钮（仅结束后可用）
                             if is_ended {
@@ -569,8 +574,47 @@ impl eframe::App for App {
                                     .rounding(Rounding::same(6.0));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
+
+                            // 计算今日统计数据
+                            let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+                            let today_records: Vec<&Record> = self.records.iter()
+                                .filter(|r| r.date == today)
+                                .collect();
+
+                            let today_count = today_records.len();
+                            let today_hours: f64 = today_records.iter()
+                                .filter_map(|r| r.duration)
+                                .sum();
+                            let today_income = self.day_balance;
+
+                            // 今日统计面板 - 使用右对齐布局
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                // 注意：right_to_left 布局从右到左添加元素，所以顺序要反过来
+                                ui.label(RichText::new(format!("{:.1}h", today_hours))
+                                    .size(14.0)
+                                    .color(text_primary));
+
+                                ui.label(RichText::new("·").size(14.0).color(text_primary));
+
+                                ui.label(RichText::new(format!("{}单", today_count))
+                                    .size(14.0)
+                                    .color(text_primary));
+
+                                ui.label(RichText::new("·").size(14.0).color(text_primary));
+
+                                ui.label(RichText::new(format_money(today_income))
+                                    .size(14.0)
+                                    .color(text_primary));
+
+                                ui.add_space(8.0);
+
+                                ui.label(RichText::new("今日收入")
+                                    .size(14.0)
+                                    .color(text_primary));
+                            });
                                 });
                             });
+                        });  // 闭合新增的 vertical (timer_card_width)
                     });
                 });
             });
@@ -661,15 +705,6 @@ impl eframe::App for App {
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
 
-                        ui.add_space(20.0);
-
-                        // 日结余
-                        ui.label(RichText::new(format_money(self.day_balance))
-                            .font(FontId::proportional(18.0))
-                            .color(text_primary));
-                        ui.label(RichText::new("日结余")
-                            .font(FontId::proportional(13.0))
-                            .color(text_secondary));
                     });
                 });
 
@@ -967,7 +1002,7 @@ impl eframe::App for App {
                         let table_w = table_inner_w;
                         // 让表格占据剩余所有高度
                         let remaining_height = ui.available_height();
-                        ui.set_min_height(remaining_height.max(400.0));
+                        ui.set_min_height(remaining_height.max(390.0));
 
                         // 固定列宽
                         let col_spacing = layout.col_spacing;
