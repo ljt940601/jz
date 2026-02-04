@@ -118,8 +118,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 800.0])
-            .with_min_inner_size([960.0, 800.0]),
+            .with_inner_size([980.0, 810.0])
+            .with_min_inner_size([960.0, 810.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -176,6 +176,10 @@ struct App {
     show_boss_suggestions: bool,
     show_game_suggestions: bool, // 游戏联想显示
 
+    // 输入验证错误状态
+    input_boss_error: bool,
+    input_income_error: bool,
+
     message: String,
     message_is_error: bool,
     message_timer: f32,
@@ -219,6 +223,8 @@ impl App {
             input_settled: false,
             show_boss_suggestions: false,
             show_game_suggestions: false,
+            input_boss_error: false,
+            input_income_error: false,
             message: String::new(),
             message_is_error: false,
             message_timer: 0.0,
@@ -272,21 +278,39 @@ impl App {
     fn add_record(&mut self) {
         const MAX_INCOME: f64 = 100_000.0; // 单笔最大10万
 
-        if self.input_boss.trim().is_empty() {
-            self.show_message("请输入老板名称", true);
+        // 重置错误状态
+        self.input_boss_error = false;
+        self.input_income_error = false;
+
+        // 验证必填项
+        let boss_empty = self.input_boss.trim().is_empty();
+        let income_invalid = self.input_income.trim().parse::<f64>()
+            .map(|v| v <= 0.0 || !v.is_finite())
+            .unwrap_or(true);
+
+        if boss_empty || income_invalid {
+            if boss_empty {
+                self.input_boss_error = true;
+            }
+            if income_invalid {
+                self.input_income_error = true;
+            }
+            // 显示具体的错误提示
+            let msg = match (boss_empty, income_invalid) {
+                (true, true) => "请输入老板名称和收入金额",
+                (true, false) => "请输入老板名称",
+                (false, true) => "请输入有效金额",
+                _ => unreachable!(),
+            };
+            self.show_message(msg, true);
             return;
         }
 
-        let income: f64 = match self.input_income.trim().parse::<f64>() {
-            Ok(v) if v > 0.0 && v.is_finite() => v,
-            _ => {
-                self.show_message("请输入有效金额", true);
-                return;
-            }
-        };
+        let income: f64 = self.input_income.trim().parse().unwrap();
 
         // 检查单笔金额上限
         if income > MAX_INCOME {
+            self.input_income_error = true;
             self.show_message(&format!("单笔金额不能超过 ¥{:.0}", MAX_INCOME), true);
             return;
         }
@@ -320,6 +344,8 @@ impl App {
                 self.input_duration.clear();
                 self.input_game.clear();
                 self.input_settled = false;
+                self.input_boss_error = false;
+                self.input_income_error = false;
                 self.refresh_data();
             }
             Err(_) => {
@@ -821,19 +847,31 @@ impl eframe::App for App {
                                 }
                             });
 
-                            // 老板列
+                            // 老板列（必填）
                             ui.vertical(|ui| {
                                 ui.set_width(boss_width);
-                                ui.label(RichText::new("老板").color(text_secondary).size(label_size));
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                                    ui.label(RichText::new("老板").color(text_secondary).size(label_size));
+                                    ui.label(RichText::new("*").color(danger_color).size(label_size));
+                                });
                                 ui.add_space(4.0);
-                                let boss_response = ui.add_sized(
-                                    [boss_width, input_height],
-                                    egui::TextEdit::singleline(&mut self.input_boss)
-                                        .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(8.0, 8.0))
-                                );
+                                // 使用 scope 限制样式修改范围
+                                let boss_response = ui.scope(|ui| {
+                                    if self.input_boss_error {
+                                        ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, danger_color);
+                                        ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, danger_color);
+                                    }
+                                    ui.add_sized(
+                                        [boss_width, input_height],
+                                        egui::TextEdit::singleline(&mut self.input_boss)
+                                            .font(FontId::proportional(input_font_size))
+                                            .margin(Vec2::new(8.0, 8.0))
+                                    )
+                                }).inner;
                                 if boss_response.gained_focus() {
                                     self.show_boss_suggestions = true;
+                                    self.input_boss_error = false; // 获得焦点时清除错误状态
                                 }
                                 // 老板建议列表
                                 let mut boss_suggestion_clicked = false;
@@ -939,17 +977,33 @@ impl eframe::App for App {
                                 );
                             });
 
-                            // 收入列
+                            // 收入列（必填）
                             ui.vertical(|ui| {
                                 ui.set_width(income_width);
-                                ui.label(RichText::new("收入").color(text_secondary).size(label_size));
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                                    ui.label(RichText::new("收入").color(text_secondary).size(label_size));
+                                    ui.label(RichText::new("*").color(danger_color).size(label_size));
+                                });
                                 ui.add_space(4.0);
-                                ui.add_sized([income_width, input_height],
-                                    egui::TextEdit::singleline(&mut self.input_income)
-                                        .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(6.0, 8.0))
-                                        .char_limit(10)
-                                );
+                                // 使用 scope 限制样式修改范围
+                                let income_response = ui.scope(|ui| {
+                                    if self.input_income_error {
+                                        ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, danger_color);
+                                        ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, danger_color);
+                                    }
+                                    ui.add_sized(
+                                        [income_width, input_height],
+                                        egui::TextEdit::singleline(&mut self.input_income)
+                                            .font(FontId::proportional(input_font_size))
+                                            .margin(Vec2::new(6.0, 8.0))
+                                            .char_limit(10)
+                                    )
+                                }).inner;
+                                // 获得焦点时清除错误状态
+                                if income_response.gained_focus() {
+                                    self.input_income_error = false;
+                                }
                             });
 
                             // 结清列
