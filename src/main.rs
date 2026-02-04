@@ -746,11 +746,11 @@ impl eframe::App for App {
                         let fixed_total = date_width + today_btn_width + btn_width + checkbox_width;
                         let spacing_total = col_spacing * 7.0;
                         let flex_total = (card_inner_w - fixed_total - spacing_total).max(200.0);
-                        // 比例总和为1.0，确保不超出宽度
-                        let boss_width = flex_total * 0.28;
-                        let game_width = flex_total * 0.28;
-                        let duration_width = flex_total * 0.18;
-                        let income_width = flex_total * 0.26;
+                        // 比例分配，并设置最小宽度保护（防止从全屏游戏切换时窗口异常缩小）
+                        let boss_width = (flex_total * 0.28).max(80.0);
+                        let game_width = (flex_total * 0.28).max(80.0);
+                        let duration_width = (flex_total * 0.18).max(50.0);
+                        let income_width = (flex_total * 0.26).max(70.0);
 
                         let mut new_year = self.input_date.year();
                         let mut new_month = self.input_date.month();
