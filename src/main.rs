@@ -261,8 +261,7 @@ impl App {
     fn refresh_data(&mut self) {
         self.records = self.db.get_all_records().unwrap_or_default();
         self.total_balance = self.db.get_total_balance();
-        let today = Local::now().date_naive();
-        self.day_balance = Self::calc_day_balance(&self.records, &today.format("%Y-%m-%d").to_string());
+        self.day_balance = Self::calc_day_balance(&self.records, &self.input_date.format("%Y-%m-%d").to_string());
         let year_month = format!("{}-{:02}", self.selected_year, self.selected_month);
         self.month_balance = Self::calc_month_balance(&self.records, &year_month);
         self.boss_balances = Self::calc_boss_balances(&self.records);
@@ -602,40 +601,42 @@ impl eframe::App for App {
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
-                            // 计算今日统计数据
-                            let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
-                            let today_records: Vec<&Record> = self.records.iter()
-                                .filter(|r| r.date == today)
+                            // 计算选中日期的统计数据
+                            let selected_date_str = self.input_date.format("%Y-%m-%d").to_string();
+                            let day_records: Vec<&Record> = self.records.iter()
+                                .filter(|r| r.date == selected_date_str)
                                 .collect();
 
-                            let today_count = today_records.len();
-                            let today_hours: f64 = today_records.iter()
+                            let day_count = day_records.len();
+                            let day_hours: f64 = day_records.iter()
                                 .filter_map(|r| r.duration)
                                 .sum();
-                            let today_income = self.day_balance;
+                            let day_income: f64 = day_records.iter().map(|r| r.income).sum();
+                            let is_today = self.input_date == Local::now().date_naive();
+                            let day_label = if is_today { "今日收入" } else { &format!("{}月{}日", self.input_date.month(), self.input_date.day()) };
 
                             // 今日统计面板 - 使用右对齐布局
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 // 注意：right_to_left 布局从右到左添加元素，所以顺序要反过来
-                                ui.label(RichText::new(format!("{:.1}h", today_hours))
+                                ui.label(RichText::new(format!("{:.1}h", day_hours))
                                     .size(14.0)
                                     .color(text_primary));
 
                                 ui.label(RichText::new("·").size(14.0).color(text_primary));
 
-                                ui.label(RichText::new(format!("{}单", today_count))
+                                ui.label(RichText::new(format!("{}单", day_count))
                                     .size(14.0)
                                     .color(text_primary));
 
                                 ui.label(RichText::new("·").size(14.0).color(text_primary));
 
-                                ui.label(RichText::new(format_money(today_income))
+                                ui.label(RichText::new(format_money(day_income))
                                     .size(14.0)
                                     .color(text_primary));
 
                                 ui.add_space(8.0);
 
-                                ui.label(RichText::new("今日收入")
+                                ui.label(RichText::new(day_label)
                                     .size(14.0)
                                     .color(text_primary));
                             });
