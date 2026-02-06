@@ -1013,7 +1013,15 @@ impl eframe::App for App {
                                 ui.label(RichText::new("结清").color(text_secondary).size(label_size));
                                 ui.add_space(4.0);
                                 ui.add_space(10.0);
-                                ui.add_sized([checkbox_width, 20.0], egui::Checkbox::new(&mut self.input_settled, ""));
+                                ui.scope(|ui| {
+                                    if self.input_settled {
+                                        ui.visuals_mut().widgets.inactive.bg_fill = danger_color;
+                                        ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(2.0, Color32::WHITE);
+                                        ui.visuals_mut().widgets.hovered.bg_fill = danger_color;
+                                        ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(2.0, Color32::WHITE);
+                                    }
+                                    ui.add_sized([checkbox_width, 20.0], egui::Checkbox::new(&mut self.input_settled, ""));
+                                });
                             });
 
                             // 添加按钮
@@ -1211,7 +1219,15 @@ impl eframe::App for App {
 
                                                     // 结清勾选框（可点击修改）
                                                     let mut settled = record.settled;
-                                                    let checkbox_response = ui.add_sized([col_widths[6], text_height], egui::Checkbox::new(&mut settled, ""));
+                                                    let checkbox_response = ui.scope(|ui| {
+                                                        if settled {
+                                                            ui.visuals_mut().widgets.inactive.bg_fill = danger_color;
+                                                            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(2.0, Color32::WHITE);
+                                                            ui.visuals_mut().widgets.hovered.bg_fill = danger_color;
+                                                            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(2.0, Color32::WHITE);
+                                                        }
+                                                        ui.add_sized([col_widths[6], text_height], egui::Checkbox::new(&mut settled, ""))
+                                                    }).inner;
                                                     if checkbox_response.changed() {
                                                         to_toggle_settled = Some((record.id, settled));
                                                     }
