@@ -206,8 +206,8 @@ impl App {
     fn new() -> Self {
         let db = Database::new().expect("无法初始化数据库");
         let records = db.get_all_records().unwrap_or_default();
-        let total_balance = db.get_total_balance();
         let today = Local::now().date_naive();
+        let total_balance = Self::calc_year_balance(&records, today.year());
         let day_balance = Self::calc_day_balance(&records, &today.format("%Y-%m-%d").to_string());
         let month_balance = Self::calc_month_balance(&records, &today.format("%Y-%m").to_string());
         let boss_balances = Self::calc_boss_balances(&records);
@@ -261,6 +261,14 @@ impl App {
             .sum()
     }
 
+    fn calc_year_balance(records: &[Record], year: i32) -> f64 {
+        let year_str = format!("{}", year);
+        records.iter()
+            .filter(|r| r.date.starts_with(&year_str))
+            .map(|r| r.income)
+            .sum()
+    }
+
     fn calc_month_balance(records: &[Record], year_month: &str) -> f64 {
         records.iter()
             .filter(|r| r.date.starts_with(year_month))
@@ -270,7 +278,7 @@ impl App {
 
     fn refresh_data(&mut self) {
         self.records = self.db.get_all_records().unwrap_or_default();
-        self.total_balance = self.db.get_total_balance();
+        self.total_balance = Self::calc_year_balance(&self.records, self.selected_year);
         self.day_balance = Self::calc_day_balance(&self.records, &self.input_date.format("%Y-%m-%d").to_string());
         let year_month = format!("{}-{:02}", self.selected_year, self.selected_month);
         self.month_balance = Self::calc_month_balance(&self.records, &year_month);
@@ -701,7 +709,7 @@ impl eframe::App for App {
                         ui.label(RichText::new(format_money(self.total_balance))
                             .font(FontId::proportional(22.0))
                             .color(green_color));
-                        ui.label(RichText::new("总结余")
+                        ui.label(RichText::new("年收入")
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
 
@@ -739,7 +747,7 @@ impl eframe::App for App {
                             }
                         });
 
-                        ui.label(RichText::new("月结余")
+                        ui.label(RichText::new("月收入")
                             .font(FontId::proportional(13.0))
                             .color(text_secondary));
 
@@ -752,6 +760,7 @@ impl eframe::App for App {
                     self.selected_month = new_sel_month;
                     let year_month = format!("{}-{:02}", self.selected_year, self.selected_month);
                     self.month_balance = Self::calc_month_balance(&self.records, &year_month);
+                    self.total_balance = Self::calc_year_balance(&self.records, self.selected_year);
                 }
 
                 ui.add_space(30.0);
