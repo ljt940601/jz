@@ -5,7 +5,7 @@ edition = "2021"
 description = "游戏陪玩记账软件"
 
 [dependencies]
-eframe = "0.27"
+eframe = "0.31"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = "0.4"
 dirs = "5.0"

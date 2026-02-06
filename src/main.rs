@@ -4,7 +4,8 @@ mod db;
 
 use chrono::{Local, NaiveDate, Datelike};
 use db::{Database, Record};
-use eframe::egui::{self, Color32, FontId, RichText, Vec2, Rounding, Stroke};
+use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Vec2, Stroke};
+use std::sync::Arc;
 use std::fs::File;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -127,7 +128,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             setup_fonts(&cc.egui_ctx);
-            Box::new(App::new())
+            Ok(Box::new(App::new()))
         }),
     )
 }
@@ -138,7 +139,7 @@ fn setup_fonts(ctx: &egui::Context) {
     if let Ok(font_data) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
         fonts.font_data.insert(
             "msyh".to_owned(),
-            egui::FontData::from_owned(font_data).into(),
+            Arc::new(egui::FontData::from_owned(font_data)),
         );
         fonts.families
             .get_mut(&egui::FontFamily::Proportional)
@@ -439,10 +440,10 @@ impl eframe::App for App {
         // ===== 底部计时器栏（固定在底部）=====
         egui::TopBottomPanel::bottom("timer_panel")
             .frame(egui::Frame::default().fill(bg_color).inner_margin(egui::Margin {
-                left: layout.panel_margin,
-                right: layout.panel_margin,
-                top: 8.0,
-                bottom: 16.0
+                left: layout.panel_margin as i8,
+                right: layout.panel_margin as i8,
+                top: 8,
+                bottom: 16
             }))
             .show(ctx, |ui| {
                 // 与内容区域等宽居中
@@ -461,8 +462,8 @@ impl eframe::App for App {
                             egui::Frame::default()
                                 .fill(Color32::TRANSPARENT)  // 透明背景
                                 .stroke(Stroke::new(1.0, accent_color))  // 蓝色细边框
-                                .rounding(Rounding::same(layout.card_rounding))  // 使用统一圆角
-                                .inner_margin(egui::Margin::symmetric(layout.card_inner_margin, 16.0))  // 减小上下边距控制高度
+                                .corner_radius(CornerRadius::same(layout.card_rounding as u8))  // 使用统一圆角
+                                .inner_margin(egui::Margin::symmetric(layout.card_inner_margin as i8, 16))  // 减小上下边距控制高度
                                 .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                             // 计算当前显示时间
@@ -516,7 +517,7 @@ impl eframe::App for App {
                             if is_initial {
                                 let start_btn = egui::Button::new(RichText::new("开始").size(13.0).color(Color32::WHITE))
                                     .fill(green_color)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, btn_height], start_btn).clicked() {
                                     self.timer_running = true;
                                     self.timer_start_instant = Some(Instant::now());
@@ -525,7 +526,7 @@ impl eframe::App for App {
                             } else {
                                 let disabled_btn = egui::Button::new(RichText::new("开始").size(13.0).color(theme.disabled_text))
                                     .fill(theme.disabled_bg)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
@@ -535,7 +536,7 @@ impl eframe::App for App {
                             if is_running {
                                 let pause_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::WHITE))
                                     .fill(theme.warning_color)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, btn_height], pause_btn).clicked() {
                                     if let Some(start) = self.timer_start_instant {
                                         self.timer_accumulated += start.elapsed();
@@ -546,7 +547,7 @@ impl eframe::App for App {
                             } else if is_paused {
                                 let resume_btn = egui::Button::new(RichText::new("继续").size(13.0).color(Color32::WHITE))
                                     .fill(accent_color)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, btn_height], resume_btn).clicked() {
                                     self.timer_running = true;
                                     self.timer_start_instant = Some(Instant::now());
@@ -554,7 +555,7 @@ impl eframe::App for App {
                             } else {
                                 let disabled_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(theme.disabled_text))
                                     .fill(theme.disabled_bg)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
@@ -565,7 +566,7 @@ impl eframe::App for App {
                                 let end_btn = egui::Button::new(RichText::new("结束").size(13.0).color(danger_color))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, danger_color))
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, btn_height], end_btn).clicked() {
                                     // 结束：停止计时但保留时间
                                     if let Some(start) = self.timer_start_instant {
@@ -579,7 +580,7 @@ impl eframe::App for App {
                                 let disabled_btn = egui::Button::new(RichText::new("结束").size(13.0).color(theme.disabled_text))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
@@ -589,7 +590,7 @@ impl eframe::App for App {
                             if is_ended {
                                 let reset_btn = egui::Button::new(RichText::new("重置").size(13.0).color(text_secondary))
                                     .fill(input_bg)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, btn_height], reset_btn).clicked() {
                                     self.timer_accumulated = Duration::ZERO;
                                     self.timer_ended = false;
@@ -597,7 +598,7 @@ impl eframe::App for App {
                             } else {
                                 let disabled_btn = egui::Button::new(RichText::new("重置").size(13.0).color(theme.disabled_text))
                                     .fill(theme.disabled_bg)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 ui.add_sized([btn_width, btn_height], disabled_btn);
                             }
 
@@ -649,14 +650,14 @@ impl eframe::App for App {
         let mut style = (*ctx.style()).clone();
         style.visuals.widgets.inactive.bg_fill = input_bg;
         style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 65, 75));
-        style.visuals.widgets.inactive.rounding = Rounding::same(8.0);
+        style.visuals.widgets.inactive.corner_radius = CornerRadius::same(8);
         style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(55, 60, 70);
         style.visuals.widgets.active.bg_fill = Color32::from_rgb(50, 55, 65);
         style.visuals.selection.bg_fill = accent_color;
         ctx.set_style(style);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::default().fill(bg_color).inner_margin(layout.panel_margin))
+            .frame(egui::Frame::default().fill(bg_color).inner_margin(layout.panel_margin as i8))
             .show(ctx, |ui| {
                 // 固定内容宽度，居中显示
                 let content_width = layout.content_width;
@@ -701,7 +702,7 @@ impl eframe::App for App {
                             .color(accent_color));
 
                         // 月份选择
-                        let month_combo = egui::ComboBox::from_id_source("header_month_select")
+                        let month_combo = egui::ComboBox::from_id_salt("header_month_select")
                             .width(45.0)
                             .selected_text(RichText::new(format!("{:02}", new_sel_month)).size(13.0).color(combo_text_color));
                         month_combo.show_ui(ui, |ui| {
@@ -716,7 +717,7 @@ impl eframe::App for App {
 
                         // 年份选择
                         let current_year = Local::now().year();
-                        let year_combo = egui::ComboBox::from_id_source("header_year_select")
+                        let year_combo = egui::ComboBox::from_id_salt("header_year_select")
                             .width(65.0)
                             .selected_text(RichText::new(format!("{}", new_sel_year)).size(13.0).color(combo_text_color));
                         year_combo.show_ui(ui, |ui| {
@@ -753,8 +754,8 @@ impl eframe::App for App {
                     ui.set_width(cards_width);
                     egui::Frame::default()
                         .fill(card_color)
-                        .rounding(Rounding::same(layout.card_rounding))
-                        .inner_margin(layout.card_inner_margin)
+                        .corner_radius(CornerRadius::same(layout.card_rounding as u8))
+                        .inner_margin(layout.card_inner_margin as i8)
                         .show(ui, |ui| {
                             ui.set_width(card_inner_w);
                         let input_height = 40.0;
@@ -795,15 +796,15 @@ impl eframe::App for App {
                                 ui.add_space(4.0);
                                 egui::Frame::default()
                                     .fill(input_bg)
-                                    .rounding(Rounding::same(8.0))
+                                    .corner_radius(CornerRadius::same(8))
                                     .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
-                                    .inner_margin(egui::Margin::symmetric(6.0, 0.0))
+                                    .inner_margin(egui::Margin::symmetric(6, 0))
                                     .show(ui, |ui| {
                                         ui.set_height(input_height);
                                         ui.horizontal_centered(|ui| {
                                             ui.spacing_mut().item_spacing.x = 2.0;
                                             let current_year = Local::now().year();
-                                            egui::ComboBox::from_id_source("year_select")
+                                            egui::ComboBox::from_id_salt("year_select")
                                                 .width(56.0)
                                                 .selected_text(RichText::new(format!("{}", new_year)).size(13.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
@@ -812,7 +813,7 @@ impl eframe::App for App {
                                                     }
                                                 });
                                             ui.label(RichText::new("-").size(13.0).color(text_secondary));
-                                            egui::ComboBox::from_id_source("month_select")
+                                            egui::ComboBox::from_id_salt("month_select")
                                                 .width(36.0)
                                                 .selected_text(RichText::new(format!("{:02}", new_month)).size(13.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
@@ -822,7 +823,7 @@ impl eframe::App for App {
                                                 });
                                             ui.label(RichText::new("-").size(13.0).color(text_secondary));
                                             let max_days = days_in_month(new_year, new_month);
-                                            egui::ComboBox::from_id_source("day_select")
+                                            egui::ComboBox::from_id_salt("day_select")
                                                 .width(36.0)
                                                 .selected_text(RichText::new(format!("{:02}", new_day)).size(13.0).color(dark_text))
                                                 .show_ui(ui, |ui| {
@@ -841,7 +842,7 @@ impl eframe::App for App {
                                 let today_btn = egui::Button::new(RichText::new("今天").size(13.0).color(accent_color))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, accent_color))
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([today_btn_width, input_height], today_btn).clicked() {
                                     set_today = true;
                                 }
@@ -866,7 +867,7 @@ impl eframe::App for App {
                                         [boss_width, input_height],
                                         egui::TextEdit::singleline(&mut self.input_boss)
                                             .font(FontId::proportional(input_font_size))
-                                            .margin(Vec2::new(8.0, 8.0))
+                                            .margin(egui::Margin::symmetric(8, 8))
                                     )
                                 }).inner;
                                 if boss_response.gained_focus() {
@@ -887,15 +888,15 @@ impl eframe::App for App {
                                             .show(ui.ctx(), |ui| {
                                                 egui::Frame::default()
                                                     .fill(Color32::from_rgb(50, 55, 65))
-                                                    .rounding(Rounding::same(6.0))
+                                                    .corner_radius(CornerRadius::same(6))
                                                     .stroke(Stroke::new(1.0, Color32::from_rgb(70, 75, 85)))
-                                                    .shadow(egui::epaint::Shadow { offset: Vec2::new(0.0, 2.0), blur: 8.0, spread: 0.0, color: Color32::from_black_alpha(60) })
-                                                    .inner_margin(4.0)
+                                                    .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(60) })
+                                                    .inner_margin(4)
                                                     .show(ui, |ui| {
                                                         ui.set_width(boss_width - 8.0);
                                                         for boss in &suggestions {
                                                             let btn = egui::Button::new(RichText::new(boss).size(14.0).color(text_primary))
-                                                                .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).rounding(Rounding::same(4.0));
+                                                                .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(CornerRadius::same(4));
                                                             if ui.add_sized([boss_width - 16.0, 28.0], btn).clicked() {
                                                                 self.input_boss = boss.clone();
                                                                 boss_suggestion_clicked = true;
@@ -921,7 +922,7 @@ impl eframe::App for App {
                                     [game_width, input_height],
                                     egui::TextEdit::singleline(&mut self.input_game)
                                         .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(8.0, 8.0))
+                                        .margin(egui::Margin::symmetric(8, 8))
                                 );
                                 if game_response.gained_focus() {
                                     self.show_game_suggestions = true;
@@ -939,15 +940,15 @@ impl eframe::App for App {
                                             .show(ui.ctx(), |ui| {
                                                 egui::Frame::default()
                                                     .fill(Color32::from_rgb(50, 55, 65))
-                                                    .rounding(Rounding::same(6.0))
+                                                    .corner_radius(CornerRadius::same(6))
                                                     .stroke(Stroke::new(1.0, Color32::from_rgb(70, 75, 85)))
-                                                    .shadow(egui::epaint::Shadow { offset: Vec2::new(0.0, 2.0), blur: 8.0, spread: 0.0, color: Color32::from_black_alpha(60) })
-                                                    .inner_margin(4.0)
+                                                    .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(60) })
+                                                    .inner_margin(4)
                                                     .show(ui, |ui| {
                                                         ui.set_width(game_width - 8.0);
                                                         for game in &suggestions {
                                                             let btn = egui::Button::new(RichText::new(game).size(14.0).color(text_primary))
-                                                                .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).rounding(Rounding::same(4.0));
+                                                                .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(CornerRadius::same(4));
                                                             if ui.add_sized([game_width - 16.0, 28.0], btn).clicked() {
                                                                 self.input_game = game.clone();
                                                                 game_suggestion_clicked = true;
@@ -972,7 +973,7 @@ impl eframe::App for App {
                                 ui.add_sized([duration_width, input_height],
                                     egui::TextEdit::singleline(&mut self.input_duration)
                                         .font(FontId::proportional(input_font_size))
-                                        .margin(Vec2::new(6.0, 8.0))
+                                        .margin(egui::Margin::symmetric(6, 8))
                                         .char_limit(5)
                                 );
                             });
@@ -996,7 +997,7 @@ impl eframe::App for App {
                                         [income_width, input_height],
                                         egui::TextEdit::singleline(&mut self.input_income)
                                             .font(FontId::proportional(input_font_size))
-                                            .margin(Vec2::new(6.0, 8.0))
+                                            .margin(egui::Margin::symmetric(6, 8))
                                             .char_limit(10)
                                     )
                                 }).inner;
@@ -1021,7 +1022,7 @@ impl eframe::App for App {
                                 ui.add_space(17.0 + 4.0);
                                 let btn = egui::Button::new(RichText::new("添加").font(FontId::proportional(14.0)).color(Color32::WHITE))
                                     .fill(accent_color)
-                                    .rounding(Rounding::same(6.0));
+                                    .corner_radius(CornerRadius::same(6));
                                 if ui.add_sized([btn_width, input_height], btn).clicked() {
                                     self.add_record();
                                 }
@@ -1048,8 +1049,8 @@ impl eframe::App for App {
                     ui.set_width(cards_width);
                     egui::Frame::default()
                         .fill(card_color)
-                        .rounding(Rounding::same(layout.card_rounding))
-                        .inner_margin(layout.card_inner_margin)
+                        .corner_radius(CornerRadius::same(layout.card_rounding as u8))
+                        .inner_margin(layout.card_inner_margin as i8)
                         .show(ui, |ui| {
                             let table_inner_w = cards_width - (layout.card_inner_margin * 2.0);
                             ui.set_width(table_inner_w);
@@ -1152,8 +1153,8 @@ impl eframe::App for App {
 
                                         egui::Frame::default()
                                             .fill(row_bg)
-                                            .rounding(Rounding::same(6.0))
-                                            .inner_margin(egui::Margin::symmetric(4.0, 6.0))
+                                            .corner_radius(CornerRadius::same(6))
+                                            .inner_margin(egui::Margin::symmetric(4, 6))
                                             .show(ui, |ui| {
                                                 ui.horizontal(|ui| {
                                                     ui.spacing_mut().item_spacing.x = col_spacing;
@@ -1223,7 +1224,7 @@ impl eframe::App for App {
                                                     )
                                                     .fill(Color32::TRANSPARENT)
                                                     .stroke(Stroke::new(1.0, danger_color))
-                                                    .rounding(Rounding::same(5.0))
+                                                    .corner_radius(CornerRadius::same(5))
                                                     .min_size(Vec2::new(48.0, 26.0));
 
                                                     if ui.add(btn).clicked() {
