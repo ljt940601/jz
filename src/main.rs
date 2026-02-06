@@ -151,6 +151,16 @@ fn setup_fonts(ctx: &egui::Context) {
             .insert(0, "msyh".to_owned());
     }
 
+    // 内嵌站酷快乐体用于标题
+    fonts.font_data.insert(
+        "zcool_kuaile".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!("../fonts/ZCOOLKuaiLe-Regular.ttf"))),
+    );
+    fonts.families.insert(
+        egui::FontFamily::Name("cute".into()),
+        vec!["zcool_kuaile".to_owned(), "msyh".to_owned()],
+    );
+
     ctx.set_fonts(fonts);
 }
 
@@ -680,7 +690,7 @@ impl eframe::App for App {
                 ui.horizontal(|ui| {
                     // 左边：标题
                     ui.label(RichText::new("陪玩日记")
-                        .font(FontId::proportional(28.0))
+                        .font(FontId::new(32.0, egui::FontFamily::Name("cute".into())))
                         .color(text_primary));
 
                     // 右边：统计信息（右对齐）
