@@ -119,10 +119,10 @@ impl Database {
             .unwrap_or(0.0)
     }
 
-    /// 获取所有老板名称（用于自动补全）
+    /// 获取所有老板名称（用于自动补全），按最近一次账单日期倒序排列
     pub fn get_all_bosses(&self) -> Vec<String> {
         let mut stmt = self.conn
-            .prepare("SELECT DISTINCT boss FROM records ORDER BY boss")
+            .prepare("SELECT boss FROM records GROUP BY boss ORDER BY MAX(date) DESC, MAX(id) DESC")
             .unwrap();
         let bosses = stmt
             .query_map([], |row| row.get(0))

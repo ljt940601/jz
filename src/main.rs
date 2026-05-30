@@ -900,7 +900,7 @@ impl eframe::App for App {
                                     let input_lower = self.input_boss.to_lowercase();
                                     let suggestions: Vec<_> = self.boss_list.iter()
                                         .filter(|b| input_lower.is_empty() || b.to_lowercase().contains(&input_lower))
-                                        .take(6).cloned().collect();
+                                        .cloned().collect();
                                     if !suggestions.is_empty() {
                                         egui::Area::new(egui::Id::new("boss_suggestions"))
                                             .order(egui::Order::Foreground)
@@ -914,14 +914,19 @@ impl eframe::App for App {
                                                     .inner_margin(4)
                                                     .show(ui, |ui| {
                                                         ui.set_width(boss_width - 8.0);
-                                                        for boss in &suggestions {
-                                                            let btn = egui::Button::new(RichText::new(boss).size(14.0).color(text_primary))
-                                                                .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(CornerRadius::same(4));
-                                                            if ui.add_sized([boss_width - 16.0, 28.0], btn).clicked() {
-                                                                self.input_boss = boss.clone();
-                                                                boss_suggestion_clicked = true;
-                                                            }
-                                                        }
+                                                        // 最多显示约 6 行高度，超出部分滚动
+                                                        egui::ScrollArea::vertical()
+                                                            .max_height(28.0 * 6.0)
+                                                            .show(ui, |ui| {
+                                                                for boss in &suggestions {
+                                                                    let btn = egui::Button::new(RichText::new(boss).size(14.0).color(text_primary))
+                                                                        .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(CornerRadius::same(4));
+                                                                    if ui.add_sized([boss_width - 16.0, 28.0], btn).clicked() {
+                                                                        self.input_boss = boss.clone();
+                                                                        boss_suggestion_clicked = true;
+                                                                    }
+                                                                }
+                                                            });
                                                     });
                                             });
                                     }
