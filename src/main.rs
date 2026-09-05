@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod alarm;
 mod db;
 
 use chrono::{Local, NaiveDate, Datelike};
@@ -23,6 +24,8 @@ struct Theme {
     warning_color: Color32,
     disabled_text: Color32,
     disabled_bg: Color32,
+    border_color: Color32,   // 输入框/按钮描边
+    accent_dim: Color32,     // 不可交互时的选中态强调色
 }
 
 impl Theme {
@@ -39,6 +42,8 @@ impl Theme {
             warning_color: Color32::from_rgb(230, 180, 80),
             disabled_text: Color32::from_rgb(80, 85, 95),
             disabled_bg: Color32::from_rgb(45, 48, 55),
+            border_color: Color32::from_rgb(60, 65, 75),
+            accent_dim: Color32::from_rgb(40, 70, 100),
         }
     }
 }
@@ -136,7 +141,13 @@ fn main() -> eframe::Result<()> {
 fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    if let Ok(font_data) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
+    // 系统中文字体：Windows 用微软雅黑；macOS 上开发调试时用黑体（同样注册为 "msyh"，供各字体族回退）
+    #[cfg(target_os = "macos")]
+    let system_font_path = "/System/Library/Fonts/STHeiti Light.ttc";
+    #[cfg(not(target_os = "macos"))]
+    let system_font_path = "C:\\Windows\\Fonts\\msyh.ttc";
+
+    if let Ok(font_data) = std::fs::read(system_font_path) {
         fonts.font_data.insert(
             "msyh".to_owned(),
             Arc::new(egui::FontData::from_owned(font_data)),
@@ -162,6 +173,21 @@ fn setup_fonts(ctx: &egui::Context) {
     );
 
     ctx.set_fonts(fonts);
+}
+
+/// 计时栏模式
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TimerMode {
+    Stopwatch, // 正计时
+    Countdown, // 倒计时
+}
+
+/// 倒计时到点后提示音最长持续秒数，超时自动静音（"时间到"显示保留到手动重置）
+const ALARM_SOUND_MAX_SECS: u64 = 60;
+
+/// 秒数格式化为 HH:MM:SS
+fn format_hms(total_secs: u64) -> String {
+    format!("{:02}:{:02}:{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60)
 }
 
 struct App {
@@ -200,6 +226,14 @@ struct App {
     timer_start_instant: Option<Instant>,
     timer_accumulated: Duration,
     timer_ended: bool,  // 是否已结束（结束后才能重置）
+
+    // 倒计时与到点提醒
+    timer_mode: TimerMode,          // 正计时 / 倒计时
+    countdown_hours: u32,           // 倒计时设置：小时
+    countdown_minutes: u32,         // 倒计时设置：分钟
+    alarm_active: bool,             // 倒计时已到点、尚未重置
+    alarm_sound_playing: bool,      // 提示音是否正在循环播放
+    alarm_started: Option<Instant>, // 到点时刻（用于闪烁与自动静音）
 }
 
 impl App {
@@ -243,6 +277,12 @@ impl App {
             timer_start_instant: None,
             timer_accumulated: Duration::ZERO,
             timer_ended: false,
+            timer_mode: TimerMode::Stopwatch,
+            countdown_hours: 1,
+            countdown_minutes: 0,
+            alarm_active: false,
+            alarm_sound_playing: false,
+            alarm_started: None,
         }
     }
 
@@ -378,6 +418,294 @@ impl App {
             self.refresh_data();
         }
     }
+
+    // ===== 计时器 / 倒计时 =====
+
+    /// 已走过的时间（正计时=显示值；倒计时=已消耗时长）
+    fn timer_elapsed(&self) -> Duration {
+        match (self.timer_running, self.timer_start_instant) {
+            (true, Some(start)) => self.timer_accumulated + start.elapsed(),
+            _ => self.timer_accumulated,
+        }
+    }
+
+    /// 倒计时设置的总时长
+    fn countdown_total(&self) -> Duration {
+        Duration::from_secs(u64::from(self.countdown_hours) * 3600 + u64::from(self.countdown_minutes) * 60)
+    }
+
+    /// 开始 / 继续
+    fn start_timer(&mut self) {
+        self.timer_running = true;
+        self.timer_start_instant = Some(Instant::now());
+        self.timer_ended = false;
+    }
+
+    fn pause_timer(&mut self) {
+        if let Some(start) = self.timer_start_instant.take() {
+            self.timer_accumulated += start.elapsed();
+        }
+        self.timer_running = false;
+    }
+
+    /// 结束：停止计时但保留显示值，之后才能重置
+    fn end_timer(&mut self) {
+        self.pause_timer();
+        self.timer_ended = true;
+    }
+
+    fn reset_timer(&mut self, ctx: &egui::Context) {
+        self.dismiss_alarm(ctx);
+        self.timer_running = false;
+        self.timer_start_instant = None;
+        self.timer_accumulated = Duration::ZERO;
+        self.timer_ended = false;
+    }
+
+    /// 倒计时到点：停表 + 循环提示音 + 任务栏闪烁 + 计时栏红色闪烁
+    fn trigger_alarm(&mut self, ctx: &egui::Context) {
+        self.timer_running = false;
+        self.timer_start_instant = None;
+        self.timer_accumulated = self.countdown_total();
+        self.timer_ended = true;
+        self.alarm_active = true;
+        self.alarm_sound_playing = true;
+        self.alarm_started = Some(Instant::now());
+        alarm::start();
+        // Windows 上会持续闪烁任务栏，直到窗口回到前台
+        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
+    }
+
+    /// 静音：停止提示音，保留"时间到"显示
+    fn stop_alarm_sound(&mut self) {
+        if self.alarm_sound_playing {
+            alarm::stop();
+            self.alarm_sound_playing = false;
+        }
+    }
+
+    /// 完全解除提醒（重置时调用）
+    fn dismiss_alarm(&mut self, ctx: &egui::Context) {
+        self.stop_alarm_sound();
+        if self.alarm_active {
+            self.alarm_active = false;
+            self.alarm_started = None;
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Reset));
+        }
+    }
+
+    /// 每帧调用：检测倒计时到点、超时自动静音、安排重绘
+    fn tick_timer(&mut self, ctx: &egui::Context) {
+        if self.timer_running {
+            if self.timer_mode == TimerMode::Countdown && self.timer_elapsed() >= self.countdown_total() {
+                self.trigger_alarm(ctx);
+            }
+            ctx.request_repaint();
+        }
+        if self.alarm_active {
+            let sound_timed_out = self
+                .alarm_started
+                .map_or(false, |t| t.elapsed().as_secs() >= ALARM_SOUND_MAX_SECS);
+            if self.alarm_sound_playing && sound_timed_out {
+                self.stop_alarm_sound();
+            }
+            // 驱动"时间到"闪烁动画
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
+    }
+
+    /// 计时栏左半部分：模式切换 + 时间显示 + 控制按钮
+    fn timer_controls_ui(&mut self, ui: &mut egui::Ui, theme: &Theme) {
+        let is_countdown = self.timer_mode == TimerMode::Countdown;
+        let is_initial = !self.timer_running && self.timer_accumulated.is_zero() && !self.timer_ended;
+        let is_running = self.timer_running;
+        let is_paused = !self.timer_running && !self.timer_accumulated.is_zero() && !self.timer_ended;
+        let is_ended = self.timer_ended;
+        let elapsed = self.timer_elapsed();
+        let countdown_total = self.countdown_total();
+
+        // 各区域固定宽度 + 显式间距，保证状态切换时按钮位置不跳动，且给右侧统计留足空间
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let mode_slot = Vec2::new(96.0, 30.0);
+        let time_slot = Vec2::new(156.0, 40.0);
+        let btn_size = [56.0, 30.0];
+        let btn_gap = 18.0;
+
+        // ---- 模式切换（仅空闲时可切换）；到点后此处显示"时间到" ----
+        ui.allocate_ui_with_layout(mode_slot, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(mode_slot);
+            if self.alarm_active {
+                ui.label(RichText::new("时间到！").size(16.0).color(theme.danger_color));
+                return;
+            }
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (mode, text) in [(TimerMode::Stopwatch, "正计时"), (TimerMode::Countdown, "倒计时")] {
+                let selected = self.timer_mode == mode;
+                let (fill, text_color, stroke) = match (selected, is_initial) {
+                    (true, true) => (theme.accent_color, Color32::WHITE, Stroke::NONE),
+                    (true, false) => (theme.accent_dim, theme.text_primary, Stroke::NONE),
+                    (false, true) => (Color32::TRANSPARENT, theme.text_secondary, Stroke::new(1.0, theme.border_color)),
+                    (false, false) => (theme.disabled_bg, theme.disabled_text, Stroke::NONE),
+                };
+                let btn = egui::Button::new(RichText::new(text).size(12.0).color(text_color))
+                    .fill(fill)
+                    .stroke(stroke)
+                    .corner_radius(CornerRadius::same(6));
+                if ui.add_sized([46.0, 24.0], btn).clicked() && is_initial {
+                    self.timer_mode = mode;
+                }
+            }
+        });
+
+        ui.add_space(12.0);
+
+        // ---- 时间显示；倒计时空闲时显示时/分设置 ----
+        ui.allocate_ui_with_layout(time_slot, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(time_slot);
+            if is_countdown && is_initial {
+                let dark_text = Color32::from_rgb(30, 30, 35);
+                ui.spacing_mut().item_spacing.x = 4.0;
+                egui::ComboBox::from_id_salt("countdown_hours")
+                    .width(56.0)
+                    .selected_text(RichText::new(format!("{:02}", self.countdown_hours)).size(13.0).color(dark_text))
+                    .show_ui(ui, |ui| {
+                        for h in 0..=12u32 {
+                            ui.selectable_value(&mut self.countdown_hours, h, format!("{:02}", h));
+                        }
+                    });
+                ui.label(RichText::new("时").size(13.0).color(theme.text_secondary));
+                egui::ComboBox::from_id_salt("countdown_minutes")
+                    .width(56.0)
+                    .selected_text(RichText::new(format!("{:02}", self.countdown_minutes)).size(13.0).color(dark_text))
+                    .show_ui(ui, |ui| {
+                        // 0~5 逐分钟，之后每 5 分钟一档
+                        for m in (0..=5u32).chain((10..60u32).step_by(5)) {
+                            ui.selectable_value(&mut self.countdown_minutes, m, format!("{:02}", m));
+                        }
+                    });
+                ui.label(RichText::new("分").size(13.0).color(theme.text_secondary));
+            } else {
+                let secs = if is_countdown {
+                    // 剩余时间向上取整，避免提前显示 00:00:00
+                    countdown_total.saturating_sub(elapsed).as_secs_f64().ceil() as u64
+                } else {
+                    elapsed.as_secs()
+                };
+                let time_color = if self.alarm_active {
+                    // 红色闪烁（0.5s 周期）
+                    let on = self.alarm_started.map_or(true, |t| (t.elapsed().as_millis() / 500) % 2 == 0);
+                    if on { theme.danger_color } else { Color32::from_rgb(120, 50, 50) }
+                } else if is_running {
+                    theme.accent_color
+                } else if is_paused {
+                    theme.warning_color
+                } else if is_ended {
+                    theme.text_primary
+                } else {
+                    theme.text_secondary
+                };
+                ui.label(RichText::new(format_hms(secs)).font(FontId::monospace(32.0)).color(time_color));
+            }
+        });
+
+        ui.add_space(16.0);
+
+        // ---- 按钮组：开始 / 暂停·继续 / 结束·静音 / 重置 ----
+        let ctx = ui.ctx().clone();
+        let solid = |text: &str, fill: Color32, color: Color32| {
+            egui::Button::new(RichText::new(text).size(13.0).color(color))
+                .fill(fill)
+                .corner_radius(CornerRadius::same(6))
+        };
+        let outlined = |text: &str, color: Color32, stroke: Color32| {
+            egui::Button::new(RichText::new(text).size(13.0).color(color))
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::new(1.0, stroke))
+                .corner_radius(CornerRadius::same(6))
+        };
+        let disabled = |text: &str| solid(text, theme.disabled_bg, theme.disabled_text);
+        let disabled_outlined = |text: &str| outlined(text, theme.disabled_text, theme.border_color);
+
+        // 开始（空闲时可用；倒计时需先设置时长）
+        let can_start = is_initial && (!is_countdown || !countdown_total.is_zero());
+        if can_start {
+            if ui.add_sized(btn_size, solid("开始", theme.green_color, Color32::WHITE)).clicked() {
+                self.start_timer();
+            }
+        } else if ui.add_sized(btn_size, disabled("开始")).clicked() && is_initial && is_countdown {
+            self.show_message("请先设置倒计时时长", true);
+        }
+
+        ui.add_space(btn_gap);
+
+        // 暂停 / 继续
+        if is_running {
+            if ui.add_sized(btn_size, solid("暂停", theme.warning_color, Color32::WHITE)).clicked() {
+                self.pause_timer();
+            }
+        } else if is_paused {
+            if ui.add_sized(btn_size, solid("继续", theme.accent_color, Color32::WHITE)).clicked() {
+                self.start_timer();
+            }
+        } else {
+            ui.add_sized(btn_size, disabled("暂停"));
+        }
+
+        ui.add_space(btn_gap);
+
+        // 结束；到点提示音播放中时此位置变为"静音"
+        if self.alarm_sound_playing {
+            if ui.add_sized(btn_size, solid("静音", theme.danger_color, Color32::WHITE)).clicked() {
+                self.stop_alarm_sound();
+            }
+        } else if is_running || is_paused {
+            if ui.add_sized(btn_size, outlined("结束", theme.danger_color, theme.danger_color)).clicked() {
+                self.end_timer();
+            }
+        } else {
+            ui.add_sized(btn_size, disabled_outlined("结束"));
+        }
+
+        ui.add_space(btn_gap);
+
+        // 重置（结束或到点后可用）
+        if is_ended {
+            if ui.add_sized(btn_size, solid("重置", theme.input_bg, theme.text_secondary)).clicked() {
+                self.reset_timer(&ctx);
+            }
+        } else {
+            ui.add_sized(btn_size, disabled("重置"));
+        }
+    }
+
+    /// 计时栏右侧：所选日期的收入 / 单数 / 时长统计
+    fn day_stats_ui(&self, ui: &mut egui::Ui, theme: &Theme) {
+        let selected_date_str = self.input_date.format("%Y-%m-%d").to_string();
+        let day_records: Vec<&Record> = self.records.iter().filter(|r| r.date == selected_date_str).collect();
+        let day_count = day_records.len();
+        // 用 fold 而非 sum：空集合的 f64 sum 会得到 -0.0，显示成 "-0.0h"
+        let day_hours: f64 = day_records.iter().filter_map(|r| r.duration).fold(0.0, |acc, h| acc + h);
+        let day_income: f64 = day_records.iter().map(|r| r.income).sum();
+        let is_today = self.input_date == Local::now().date_naive();
+        let day_label = if is_today {
+            "今日收入".to_string()
+        } else {
+            format!("{}月{}日", self.input_date.month(), self.input_date.day())
+        };
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // right_to_left 布局从右到左添加元素，所以顺序要反过来
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let text = |s: String| RichText::new(s).size(14.0).color(theme.text_primary);
+            ui.label(text(format!("{:.1}h", day_hours)));
+            ui.label(text("·".to_string()));
+            ui.label(text(format!("{}单", day_count)));
+            ui.label(text("·".to_string()));
+            ui.label(text(format_money(day_income)));
+            ui.add_space(8.0);
+            ui.label(text(day_label));
+        });
+    }
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
@@ -435,10 +763,8 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
 
-        // 计时器运行时持续刷新
-        if self.timer_running {
-            ctx.request_repaint();
-        }
+        // 计时器 / 倒计时推进（含到点提醒）
+        self.tick_timer(ctx);
 
         // 加载主题和布局配置
         let theme = Theme::default();
@@ -455,6 +781,7 @@ impl eframe::App for App {
         let danger_color = theme.danger_color;
 
         // ===== 底部计时器栏（固定在底部）=====
+        let timer_border = if self.alarm_active { danger_color } else { accent_color };
         egui::TopBottomPanel::bottom("timer_panel")
             .frame(egui::Frame::default().fill(bg_color).inner_margin(egui::Margin {
                 left: layout.panel_margin as i8,
@@ -472,195 +799,18 @@ impl eframe::App for App {
                     ui.add_space(side_margin);
                     ui.vertical(|ui| {
                         ui.set_width(content_width);
-                        // 获取实际卡片宽度，与表格对齐
-                        let timer_card_width = ui.available_width();
-                        ui.vertical(|ui| {
-                            ui.set_width(timer_card_width);
-                            egui::Frame::default()
-                                .fill(Color32::TRANSPARENT)  // 透明背景
-                                .stroke(Stroke::new(1.0, accent_color))  // 蓝色细边框
-                                .corner_radius(CornerRadius::same(layout.card_rounding as u8))  // 使用统一圆角
-                                .inner_margin(egui::Margin::symmetric(layout.card_inner_margin as i8, 16))  // 减小上下边距控制高度
-                                .show(ui, |ui| {
+                        egui::Frame::default()
+                            .fill(Color32::TRANSPARENT)  // 透明背景
+                            .stroke(Stroke::new(1.0, timer_border))  // 细边框，到点时变红
+                            .corner_radius(CornerRadius::same(layout.card_rounding as u8))
+                            .inner_margin(egui::Margin::symmetric(layout.card_inner_margin as i8, 16))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
                                 ui.horizontal(|ui| {
-                            // 计算当前显示时间
-                            let elapsed = if self.timer_running {
-                                if let Some(start) = self.timer_start_instant {
-                                    self.timer_accumulated + start.elapsed()
-                                } else {
-                                    self.timer_accumulated
-                                }
-                            } else {
-                                self.timer_accumulated
-                            };
-
-                            let total_secs = elapsed.as_secs();
-                            let hours = total_secs / 3600;
-                            let minutes = (total_secs % 3600) / 60;
-                            let seconds = total_secs % 60;
-                            let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
-
-                            // 判断计时器状态
-                            let is_initial = !self.timer_running && self.timer_accumulated.is_zero() && !self.timer_ended;
-                            let is_running = self.timer_running;
-                            let is_paused = !self.timer_running && !self.timer_accumulated.is_zero() && !self.timer_ended;
-                            let is_ended = self.timer_ended;
-
-                            // 左侧：标签
-                            ui.label(RichText::new("计时").size(14.0).color(text_secondary));
-                            ui.add_space(16.0);
-
-                            // 时间显示（放大字体，更突出）
-                            let time_color = if is_running {
-                                accent_color
-                            } else if is_paused {
-                                theme.warning_color
-                            } else if is_ended {
-                                text_primary
-                            } else {
-                                text_secondary
-                            };
-                            ui.label(RichText::new(time_str)
-                                .font(FontId::monospace(32.0))  // 从24放大到32
-                                .color(time_color));
-
-                            ui.add_space(24.0);
-
-                            // 按钮区域
-                            let btn_height = 30.0;
-                            let btn_width = 56.0;
-
-                            // 开始按钮（仅初始状态可用）
-                            if is_initial {
-                                let start_btn = egui::Button::new(RichText::new("开始").size(13.0).color(Color32::WHITE))
-                                    .fill(green_color)
-                                    .corner_radius(CornerRadius::same(6));
-                                if ui.add_sized([btn_width, btn_height], start_btn).clicked() {
-                                    self.timer_running = true;
-                                    self.timer_start_instant = Some(Instant::now());
-                                    self.timer_ended = false;
-                                }
-                            } else {
-                                let disabled_btn = egui::Button::new(RichText::new("开始").size(13.0).color(theme.disabled_text))
-                                    .fill(theme.disabled_bg)
-                                    .corner_radius(CornerRadius::same(6));
-                                ui.add_sized([btn_width, btn_height], disabled_btn);
-                            }
-
-                            ui.add_space(12.0);  // 增加按钮间距
-
-                            // 暂停/继续按钮（运行中或暂停中可用）
-                            if is_running {
-                                let pause_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(Color32::WHITE))
-                                    .fill(theme.warning_color)
-                                    .corner_radius(CornerRadius::same(6));
-                                if ui.add_sized([btn_width, btn_height], pause_btn).clicked() {
-                                    if let Some(start) = self.timer_start_instant {
-                                        self.timer_accumulated += start.elapsed();
-                                    }
-                                    self.timer_running = false;
-                                    self.timer_start_instant = None;
-                                }
-                            } else if is_paused {
-                                let resume_btn = egui::Button::new(RichText::new("继续").size(13.0).color(Color32::WHITE))
-                                    .fill(accent_color)
-                                    .corner_radius(CornerRadius::same(6));
-                                if ui.add_sized([btn_width, btn_height], resume_btn).clicked() {
-                                    self.timer_running = true;
-                                    self.timer_start_instant = Some(Instant::now());
-                                }
-                            } else {
-                                let disabled_btn = egui::Button::new(RichText::new("暂停").size(13.0).color(theme.disabled_text))
-                                    .fill(theme.disabled_bg)
-                                    .corner_radius(CornerRadius::same(6));
-                                ui.add_sized([btn_width, btn_height], disabled_btn);
-                            }
-
-                            ui.add_space(12.0);  // 增加按钮间距
-
-                            // 结束按钮（运行中或暂停中可用，结束后禁用）
-                            if is_running || is_paused {
-                                let end_btn = egui::Button::new(RichText::new("结束").size(13.0).color(danger_color))
-                                    .fill(Color32::TRANSPARENT)
-                                    .stroke(Stroke::new(1.0, danger_color))
-                                    .corner_radius(CornerRadius::same(6));
-                                if ui.add_sized([btn_width, btn_height], end_btn).clicked() {
-                                    // 结束：停止计时但保留时间
-                                    if let Some(start) = self.timer_start_instant {
-                                        self.timer_accumulated += start.elapsed();
-                                    }
-                                    self.timer_running = false;
-                                    self.timer_start_instant = None;
-                                    self.timer_ended = true;
-                                }
-                            } else {
-                                let disabled_btn = egui::Button::new(RichText::new("结束").size(13.0).color(theme.disabled_text))
-                                    .fill(Color32::TRANSPARENT)
-                                    .stroke(Stroke::new(1.0, Color32::from_rgb(60, 65, 75)))
-                                    .corner_radius(CornerRadius::same(6));
-                                ui.add_sized([btn_width, btn_height], disabled_btn);
-                            }
-
-                            ui.add_space(12.0);  // 增加按钮间距
-
-                            // 重置按钮（仅结束后可用）
-                            if is_ended {
-                                let reset_btn = egui::Button::new(RichText::new("重置").size(13.0).color(text_secondary))
-                                    .fill(input_bg)
-                                    .corner_radius(CornerRadius::same(6));
-                                if ui.add_sized([btn_width, btn_height], reset_btn).clicked() {
-                                    self.timer_accumulated = Duration::ZERO;
-                                    self.timer_ended = false;
-                                }
-                            } else {
-                                let disabled_btn = egui::Button::new(RichText::new("重置").size(13.0).color(theme.disabled_text))
-                                    .fill(theme.disabled_bg)
-                                    .corner_radius(CornerRadius::same(6));
-                                ui.add_sized([btn_width, btn_height], disabled_btn);
-                            }
-
-                            // 计算选中日期的统计数据
-                            let selected_date_str = self.input_date.format("%Y-%m-%d").to_string();
-                            let day_records: Vec<&Record> = self.records.iter()
-                                .filter(|r| r.date == selected_date_str)
-                                .collect();
-
-                            let day_count = day_records.len();
-                            let day_hours: f64 = day_records.iter()
-                                .filter_map(|r| r.duration)
-                                .sum();
-                            let day_income: f64 = day_records.iter().map(|r| r.income).sum();
-                            let is_today = self.input_date == Local::now().date_naive();
-                            let day_label = if is_today { "今日收入" } else { &format!("{}月{}日", self.input_date.month(), self.input_date.day()) };
-
-                            // 今日统计面板 - 使用右对齐布局
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // 注意：right_to_left 布局从右到左添加元素，所以顺序要反过来
-                                ui.label(RichText::new(format!("{:.1}h", day_hours))
-                                    .size(14.0)
-                                    .color(text_primary));
-
-                                ui.label(RichText::new("·").size(14.0).color(text_primary));
-
-                                ui.label(RichText::new(format!("{}单", day_count))
-                                    .size(14.0)
-                                    .color(text_primary));
-
-                                ui.label(RichText::new("·").size(14.0).color(text_primary));
-
-                                ui.label(RichText::new(format_money(day_income))
-                                    .size(14.0)
-                                    .color(text_primary));
-
-                                ui.add_space(8.0);
-
-                                ui.label(RichText::new(day_label)
-                                    .size(14.0)
-                                    .color(text_primary));
-                            });
+                                    self.timer_controls_ui(ui, &theme);
+                                    self.day_stats_ui(ui, &theme);
                                 });
                             });
-                        });  // 闭合新增的 vertical (timer_card_width)
                     });
                 });
             });
